@@ -99,14 +99,25 @@ export MESA_VK_WSI_PRESENT_MODE=mailbox
 
 ---
 
-## 4. Driver Modes & Fallback Matrix
+## 4. Driver Modes & Fallback Matrix (Adreno 825 / A8xx Flexibility)
 
-| Mode | Driver Backend | Target Use Case | Performance |
+Because the Xiaomi Pad 8 features the newer **Qualcomm Adreno 825 (A8xx series)** GPU, upstream Mesa Turnip support and stability may vary across Mesa release cycles and kernel driver revisions. To guarantee maximum flexibility and uninterrupted productivity, the external GPU Driver Library supports two hardware-accelerated modes in addition to virtualized and software fallbacks:
+
+1. **Open-Source Mesa Turnip Driver (`turnip_kgsl`):**
+   Standard `.tar.gz` driver package containing Mesa's `libvulkan_freedreno.so` communicating directly with `/dev/kgsl-3d0`. Provides native Vulkan 1.3 for Hyprland, Wayland compositors, and modern Vulkan-native toolchains.
+2. **Proprietary Qualcomm Adreno Driver + Zink (`adreno_proprietary_zink`):**
+   Extracted Android vendor binary (`libvulkan_adreno.so` from device firmware `/vendor/lib64/hw/vulkan.adreno.so`). While proprietary drivers do not natively implement desktop GLX/DRI interfaces, ALW pairs the proprietary Vulkan ICD with **Mesa Zink** (`MESA_LOADER_DRIVER_OVERRIDE=zink`) to translate desktop OpenGL 4.6 calls into proprietary Adreno Vulkan calls. This serves as an alternative acceleration path if a specific Mesa Turnip build exhibits rendering anomalies on A8xx hardware.
+3. **Mesa LLVM Software Rasterizer (`llvmpipe`):**
+   CPU software rendering fallback used by one-tap **Safe Mode** (`LabWC + llvmpipe`) to guarantee desktop accessibility during driver crashes.
+4. **Virtual 3D Driver (`virgl` / `venus`):**
+   For hypervisor or container test environments.
+
+| Driver Preset ID | Vulkan Driver | OpenGL Driver | Target Hardware Use Case |
 |---|---|---|---|
-| `turnip_kgsl` | Turnip -> `/dev/kgsl-3d0` | Default for Hyprland, Vulkan games, Modern IDEs | Native GPU (100%) |
-| `turnip_zink` | Zink (OpenGL over Turnip Vulkan) | Legacy OpenGL 3.x/4.x desktop applications | ~85-95% Native |
-| `llvmpipe` | Mesa LLVM Software Rasterizer | One-Tap **Safe Mode**; GPU recovery | CPU Software (~5-15%) |
-| `virgl` | Virtual 3D driver | Running inside virtualization / hypervisors | ~60-80% Native |
+| `turnip_kgsl` | Mesa Turnip (`libvulkan_freedreno.so`) | Freedreno / Turnip native | Default for Adreno 825 (100% Native Vulkan 1.3) |
+| `adreno_proprietary_zink` | Qualcomm Adreno (`libvulkan_adreno.so`) | Mesa Zink over Adreno Vulkan | Alternative hardware path if Turnip A8xx regresses |
+| `llvmpipe` | None (Software) | Mesa LLVMpipe (CPU) | Safe Mode & crash recovery (100% stable) |
+| `virgl` | VirGL / Venus | VirGL GLES wrapper | Virtualized test environments |
 
 ---
 

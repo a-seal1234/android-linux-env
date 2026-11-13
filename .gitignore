@@ -1,0 +1,32 @@
+# Gradle build outputs & cache
+.gradle/
+build/
+*/build/
+*/*/build/
+
+# Android Studio & IntelliJ
+.idea/
+*.iml
+.shelf/
+local.properties
+
+# Android build outputs & caches
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Linux Rootfs testing directories & runtime caches
+rootfs/
+files/rootfs/
+files/drivers/
+files/runtime/
+*.tar.xz
+*.tar.gz
+*.tar.zst
+
+# OS & temporary files
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.bak

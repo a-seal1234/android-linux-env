@@ -1,0 +1,16 @@
+# Build directories & caches
+.gradle/
+build/
+*/build/
+*/*/build/
+.cxx/
+.externalNativeBuild/
+
+# Rootfs images, tarballs & drivers
+rootfs/
+files/rootfs/
+files/drivers/
+files/runtime/
+*.tar.xz
+*.tar.gz
+*.tar.zst

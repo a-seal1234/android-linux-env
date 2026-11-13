@@ -8,7 +8,9 @@
 
 ## 1. Overview & Architecture
 
-The `wayland-bridge` is a native C/Rust component embedded directly into the Android application process. Rather than launching an external display server (such as an X11 server or VNC daemon), the bridge acts as an in-process Wayland display server (`wl_display`) that renders directly into an Android `ANativeWindow`.
+The `wayland-bridge` is a native C/Rust component embedded directly into the Android application process. Rather than launching an external display server (such as an X11 server or VNC daemon) or writing a `libwayland-server` + `ANativeWindow` compositor from scratch, the bridge vendors and adapts the proven embedded Wayland compositor and PulseAudio/PipeWire bridge architecture from **`Beauty114514/trierarch-app`**.
+
+The adapted architecture embeds an in-process Wayland display server (`wl_display`) that renders directly into an Android `ANativeWindow` while forwarding guest audio through a dedicated PulseAudio-compatible UNIX domain socket.
 
 ```
 +--------------------------------------------------------------------------+
@@ -18,7 +20,7 @@ The `wayland-bridge` is a native C/Rust component embedded directly into the And
                                     | JNI: onSurfaceCreated(ANativeWindow*)
                                     v
 +--------------------------------------------------------------------------+
-|                       wayland-bridge (Native Engine)                     |
+|              wayland-bridge (Adapted from trierarch-app)                 |
 |                                                                          |
 |   +---------------------+   +---------------------+   +----------------+ |
 |   | Wayland Sockets Mgr |   |  Buffer Compositor  |   |  Input Router  | |

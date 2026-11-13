@@ -1,0 +1,61 @@
+package com.alw.workstation.core.session
+
+import com.alw.workstation.core.session.model.StackProfile
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class StackProfileTest {
+
+    @Test
+    fun testDefaultArchXiaomiPad8Profile() {
+        val profile = StackProfile.defaultArchXiaomiPad8()
+        assertEquals("arch-xiaomi-pad-8", profile.id)
+        assertEquals("aarch64", profile.distro.architecture)
+        assertEquals("archlinux-default", profile.distro.rootfsId)
+        assertEquals(StackProfile.CompositorType.HYPRLAND, profile.compositor.type)
+        assertEquals(StackProfile.DriverMode.TURNIP_KGSL, profile.gpu.driverMode)
+        assertEquals("/dev/kgsl-3d0", profile.gpu.kgslNode)
+        assertEquals(144, profile.display.refreshRateHz)
+        assertTrue(profile.input.requestPointerCapture)
+        assertTrue(profile.input.rebindCapsToSuper)
+        assertTrue(profile.storage.cacheRedirection.enabled)
+        assertTrue(profile.storage.excludePaths.contains("/storage/emulated/0/Android/data"))
+    }
+
+    @Test
+    fun testSafeModeProfile() {
+        val profile = StackProfile.safeModeProfile()
+        assertEquals("safe-mode", profile.id)
+        assertEquals(StackProfile.CompositorType.LABWC, profile.compositor.type)
+        assertEquals(StackProfile.DriverMode.LLVMPIPE, profile.gpu.driverMode)
+        assertEquals("llvmpipe", profile.gpu.mesaLoaderOverride)
+        assertFalse(profile.storage.bindSdcard)
+        assertFalse(profile.input.rebindCapsToSuper)
+    }
+
+    @Test
+    fun testConfigSynthesizerNonDestructiveWrapper() {
+        val profile = StackProfile.defaultArchXiaomiPad8()
+        val config = ConfigSynthesizer.synthesizeHyprlandConfig(profile)
+
+        // Verifies step 1 sources user config first (non-destructive invariant)
+        assertTrue(config.contains("source = /home/alw/.config/hypr/hyprland.conf"))
+
+        // Verifies step 2 appends overrides
+        assertTrue(config.contains("monitor = WL-1, 3200x2136@144, 0x0, 1.75"))
+        assertTrue(config.contains("kb_options = caps:super"))
+        assertTrue(config.contains("env = WAYLAND_DISPLAY,wayland-0"))
+        assertTrue(config.contains("env = ELECTRON_OZONE_PLATFORM_HINT,wayland"))
+    }
+
+    @Test
+    fun testJsonSerializationRoundTrip() {
+        val profile = StackProfile.defaultArchXiaomiPad8()
+        val json = profile.toJson()
+        assertEquals("1.0.0", json.getString("schemaVersion"))
+        assertEquals("arch-xiaomi-pad-8", json.getString("id"))
+        assertEquals("turnip_kgsl", json.getJSONObject("gpu").getString("driverMode"))
+    }
+}
