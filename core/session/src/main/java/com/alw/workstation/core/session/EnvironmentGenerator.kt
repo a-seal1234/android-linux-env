@@ -21,10 +21,19 @@ object EnvironmentGenerator {
         env["SHELL"] = profile.distro.shell
         env["PATH"] = "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin"
 
-        // 2. Wayland runtime environment
+        // 2. Wayland runtime environment & nested compositor backend
         env["XDG_RUNTIME_DIR"] = "/tmp/runtime-alw"
         env["WAYLAND_DISPLAY"] = "wayland-0"
         env["XDG_SESSION_TYPE"] = "wayland"
+        env["AQ_BACKEND"] = "wayland"
+        env["WLR_BACKENDS"] = "wayland"
+        env["WLR_RENDERER"] = when (profile.gpu.driverMode) {
+            StackProfile.DriverMode.TURNIP_KGSL,
+            StackProfile.DriverMode.TURNIP_ZINK,
+            StackProfile.DriverMode.ADRENO_PROPRIETARY_ZINK -> "gles2"
+            StackProfile.DriverMode.LLVMPIPE -> "gles2"
+            StackProfile.DriverMode.VIRGL -> "gles2"
+        }
         env["XDG_CURRENT_DESKTOP"] = when (profile.compositor.type) {
             StackProfile.CompositorType.HYPRLAND -> "Hyprland"
             StackProfile.CompositorType.LABWC -> "LabWC"

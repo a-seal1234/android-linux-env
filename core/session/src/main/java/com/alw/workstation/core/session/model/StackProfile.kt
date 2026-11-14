@@ -332,7 +332,8 @@ data class StackProfile(
                     type = CompositorType.LABWC,
                     execCommand = "labwc",
                     configMode = ConfigMode.SAFE_MODE,
-                    sessionConfigPath = "/tmp/android-safe-mode.conf"
+                    sessionConfigPath = "/tmp/android-safe-mode.conf",
+                    extraArgs = listOf("-s", "kitty")
                 ),
                 gpu = GpuConfig(
                     driverMode = DriverMode.LLVMPIPE,

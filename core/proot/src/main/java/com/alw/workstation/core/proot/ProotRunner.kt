@@ -156,10 +156,15 @@ class ProotRunner(
             args.add("$k=$v")
         }
 
-        // 12. Command to execute
+        // 12. Command to execute (wrapped with dbus-run-session for Wayland compositors)
         val execCmd = customExecCommand ?: profile.compositor.execCommand
         val execArgs = customArgs ?: profile.compositor.extraArgs
 
+        // Wrap compositor sessions in dbus-run-session for clipboard & XDG portal services
+        if (customExecCommand == null) {
+            args.add("dbus-run-session")
+            args.add("--")
+        }
         args.add(execCmd)
         args.addAll(execArgs)
 

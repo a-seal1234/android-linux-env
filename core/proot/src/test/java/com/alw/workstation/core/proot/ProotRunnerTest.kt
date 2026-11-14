@@ -61,7 +61,9 @@ class ProotRunnerTest {
         assertTrue(envArgs.any { it.startsWith("GALLIUM_DRIVER=zink") })
         assertTrue(envArgs.any { it.startsWith("TU_DEBUG=noconform") })
 
-        // Check compositor exec
+        // Check compositor exec with D-Bus session wrapping
+        assertTrue(cmd.arguments.contains("dbus-run-session"))
+        assertTrue(cmd.arguments.contains("--"))
         assertTrue(cmd.arguments.contains("Hyprland"))
         assertTrue(cmd.arguments.contains("-c"))
         assertTrue(cmd.arguments.contains("/tmp/android-session.conf"))
@@ -78,7 +80,10 @@ class ProotRunnerTest {
         assertTrue(envArgs.any { it.startsWith("MESA_LOADER_DRIVER_OVERRIDE=llvmpipe") })
         assertTrue(envArgs.any { it.startsWith("LIBGL_ALWAYS_SOFTWARE=1") })
 
+        assertTrue(cmd.arguments.contains("dbus-run-session"))
         assertTrue(cmd.arguments.contains("labwc"))
+        assertTrue(cmd.arguments.contains("-s"))
+        assertTrue(cmd.arguments.contains("kitty"))
     }
 
     @Test
