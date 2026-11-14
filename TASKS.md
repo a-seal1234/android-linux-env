@@ -57,6 +57,8 @@ This root file is the repository’s only workflow-status source. Task scope, ac
 | Before RC1 | 17 | TASK-017 — Xiaomi Pad 8 hardware hardening & 144Hz | Target device validation, input latency, and display tuning. |
 | Before RC1 | 18 | TASK-018 — High-concurrency compilation stress test | 32+ thread compilation and thermal stability verification. |
 | Before RC1 | 19 | TASK-019 — RC1 candidate packaging & release audit | Signed release APK, security review, and release documentation. |
+| Before RC1 | 20 | TASK-020 — Native PTY & interactive terminal console | Direct interactive bash shell inside guest rootfs (Phase A). |
+| Before RC1 | 21 | TASK-021 — Real Wayland wire server & ANativeWindow blitter | Full Wayland wire protocol and frame compositor (Phase B). |
 
 ### RC1 exit gate
 - All tasks in the **Before RC1** table are marked **Done** with revision-bound evidence.
@@ -113,3 +115,5 @@ See the [Initiative index](docs/initiatives/android-linux-workstation/INITIATIVE
 | TASK-017 | [Xiaomi Pad 8 Hardware Hardening & 144Hz Benchmarks](docs/tasks/TASK-017/TASK.md) | Planned | [EPIC-ALW-P4 — Phase 4](docs/initiatives/android-linux-workstation/epics/phase-4-benchmarking-hardening/EPIC.md) | Unassigned / local Linux | High Risk | Requires TASK-012, TASK-013, TASK-015. |
 | TASK-018 | [High-Concurrency Build Stress & Thermal Throttling Test](docs/tasks/TASK-018/TASK.md) | Planned | [EPIC-ALW-P4 — Phase 4](docs/initiatives/android-linux-workstation/epics/phase-4-benchmarking-hardening/EPIC.md) | Unassigned / local Linux | High Risk | Requires TASK-016. |
 | TASK-019 | [RC1 Candidate Packaging, Security Audit & Release](docs/tasks/TASK-019/TASK.md) | Planned | [EPIC-ALW-P4 — Phase 4](docs/initiatives/android-linux-workstation/epics/phase-4-benchmarking-hardening/EPIC.md) | Unassigned / local Linux | Critical | Requires TASK-017, TASK-018. |
+| TASK-020 | [Native PTY Subprocess Engine & Interactive Terminal Console UI](docs/tasks/TASK-020/TASK.md) | Done | [EPIC-ALW-P3 — Phase 3](docs/initiatives/android-linux-workstation/epics/phase-3-onboarding-ui-integrations/EPIC.md) | Codex / local Linux | High Risk | Complete. Native PTY bridge (openpty/forkpty), interactive Compose terminal UI with hardware keyboard support, and direct PRoot bash session verified. [Evidence](docs/tasks/TASK-020/evidence/verification.md). |
+| TASK-021 | [Embedded Wayland Protocol Server & ANativeWindow Blitter](docs/tasks/TASK-021/TASK.md) | Planned | [EPIC-ALW-P2 — Phase 2](docs/initiatives/android-linux-workstation/epics/phase-2-wayland-turnip-compositor/EPIC.md) | Unassigned / local Linux | Critical | Planned (Phase B). Implement full Wayland wire protocol dispatching and ANativeWindow buffer blitter. |

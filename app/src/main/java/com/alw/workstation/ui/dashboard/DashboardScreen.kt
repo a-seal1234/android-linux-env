@@ -34,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -48,6 +49,7 @@ fun DashboardScreen(
     viewModel: DashboardViewModel,
     onLaunchSession: () -> Unit,
     onOpenWizard: () -> Unit,
+    onOpenTerminal: () -> Unit = {},
     onOpenConfigurator: (String?) -> Unit = {},
     onOpenDriverStore: () -> Unit = {}
 ) {
@@ -68,6 +70,7 @@ fun DashboardScreen(
             // Dashboard Header
             DashboardTopBar(
                 onOpenWizard = onOpenWizard,
+                onOpenTerminal = onOpenTerminal,
                 onOpenDriverStore = onOpenDriverStore,
                 onRefresh = { viewModel.refresh() }
             )
@@ -81,6 +84,7 @@ fun DashboardScreen(
                     viewModel.launchSession(scope)
                     onLaunchSession()
                 },
+                onOpenTerminal = onOpenTerminal,
                 onEdit = {
                     onOpenConfigurator(state.activeProfile?.id)
                 }
@@ -157,6 +161,7 @@ fun DashboardScreen(
 @Composable
 fun DashboardTopBar(
     onOpenWizard: () -> Unit,
+    onOpenTerminal: () -> Unit = {},
     onOpenDriverStore: () -> Unit = {},
     onRefresh: () -> Unit
 ) {
@@ -182,6 +187,12 @@ fun DashboardTopBar(
             OutlinedButton(onClick = onRefresh) {
                 Text("Refresh")
             }
+            OutlinedButton(
+                onClick = onOpenTerminal,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF3FB950))
+            ) {
+                Text(">_ Terminal", fontWeight = FontWeight.Bold)
+            }
             OutlinedButton(onClick = onOpenDriverStore) {
                 Text("Driver Store")
             }
@@ -196,6 +207,7 @@ fun DashboardTopBar(
 fun ActiveProfileHeroCard(
     profile: StackProfile?,
     onLaunch: () -> Unit,
+    onOpenTerminal: () -> Unit = {},
     onEdit: () -> Unit = {}
 ) {
     Card(
@@ -232,11 +244,14 @@ fun ActiveProfileHeroCard(
                     OutlinedButton(onClick = onEdit) {
                         Text("Configure")
                     }
+                    OutlinedButton(onClick = onOpenTerminal) {
+                        Text(">_ Shell")
+                    }
                     Button(
                         onClick = onLaunch,
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
-                        Text("Launch Workstation", fontWeight = FontWeight.Bold)
+                        Text("Launch GUI", fontWeight = FontWeight.Bold)
                     }
                 }
             }

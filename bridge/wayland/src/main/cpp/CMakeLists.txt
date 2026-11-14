@@ -6,6 +6,7 @@ add_library(
     SHARED
     wayland_bridge.cpp
     audio_bridge.cpp
+    pty_bridge.cpp
 )
 
 find_library(

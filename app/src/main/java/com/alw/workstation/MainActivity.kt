@@ -38,6 +38,8 @@ import com.alw.workstation.ui.dashboard.DashboardViewModel
 import com.alw.workstation.ui.driverstore.DriverStoreScreen
 import com.alw.workstation.ui.driverstore.DriverStoreViewModel
 import com.alw.workstation.ui.session.SessionSurfaceScreen
+import com.alw.workstation.ui.terminal.TerminalScreen
+import com.alw.workstation.ui.terminal.TerminalViewModel
 import com.alw.workstation.ui.theme.WorkstationTheme
 import com.alw.workstation.ui.wizard.WizardScreen
 import com.alw.workstation.ui.wizard.WizardViewModel
@@ -47,7 +49,8 @@ enum class AppScreen {
     DASHBOARD,
     SESSION,
     CONFIGURATOR,
-    DRIVER_STORE
+    DRIVER_STORE,
+    TERMINAL
 }
 
 class MainActivity : ComponentActivity() {
@@ -73,6 +76,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var dashboardViewModel: DashboardViewModel
     private lateinit var stackConfiguratorViewModel: StackConfiguratorViewModel
     private lateinit var driverStoreViewModel: DriverStoreViewModel
+    private lateinit var terminalViewModel: TerminalViewModel
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -140,6 +144,14 @@ class MainActivity : ComponentActivity() {
             releaseFetcher = releaseFetcher
         )
 
+        terminalViewModel = TerminalViewModel(
+            dirs = dirs,
+            rootfsManager = rootfsManager,
+            rootfsExtractor = rootfsExtractor,
+            prootRunner = prootRunner,
+            profileRepository = profileRepository
+        )
+
         setContent {
             WorkstationTheme {
                 WorkstationAppRoot(
@@ -147,6 +159,7 @@ class MainActivity : ComponentActivity() {
                     dashboardViewModel = dashboardViewModel,
                     stackConfiguratorViewModel = stackConfiguratorViewModel,
                     driverStoreViewModel = driverStoreViewModel,
+                    terminalViewModel = terminalViewModel,
                     serverManager = serverManager,
                     inputDispatcher = inputDispatcher,
                     rootfsManager = rootfsManager,
@@ -179,6 +192,7 @@ fun WorkstationAppRoot(
     dashboardViewModel: DashboardViewModel,
     stackConfiguratorViewModel: StackConfiguratorViewModel,
     driverStoreViewModel: DriverStoreViewModel,
+    terminalViewModel: TerminalViewModel,
     serverManager: WaylandServerManager,
     inputDispatcher: InputDispatcher,
     rootfsManager: RootfsManager,
@@ -216,6 +230,10 @@ fun WorkstationAppRoot(
                     },
                     onOpenWizard = {
                         currentScreen = AppScreen.WIZARD
+                    },
+                    onOpenTerminal = {
+                        terminalViewModel.refreshRootfsStatus()
+                        currentScreen = AppScreen.TERMINAL
                     },
                     onOpenConfigurator = { profileId ->
                         stackConfiguratorViewModel.loadProfile(profileId)
@@ -257,6 +275,18 @@ fun WorkstationAppRoot(
                     onBack = {
                         dashboardViewModel.refresh()
                         currentScreen = AppScreen.DASHBOARD
+                    }
+                )
+            }
+            AppScreen.TERMINAL -> {
+                TerminalScreen(
+                    viewModel = terminalViewModel,
+                    onBack = {
+                        dashboardViewModel.refresh()
+                        currentScreen = AppScreen.DASHBOARD
+                    },
+                    onOpenWizard = {
+                        currentScreen = AppScreen.WIZARD
                     }
                 )
             }
