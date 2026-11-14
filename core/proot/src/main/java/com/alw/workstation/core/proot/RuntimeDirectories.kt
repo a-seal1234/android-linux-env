@@ -11,6 +11,7 @@ data class RuntimeDirectories(
     val nativeLibDir: String,
     val rootfsBaseDir: File = File(filesDir, "rootfs"),
     val driversBaseDir: File = File(filesDir, "drivers"),
+    val turnipDriversBaseDir: File = File(driversBaseDir, "turnip"),
     val runtimeBaseDir: File = File(filesDir, "runtime"),
     val prootTmpDir: File = File(filesDir, "tmp")
 ) {
@@ -22,12 +23,14 @@ data class RuntimeDirectories(
 
     fun getRootfsDir(rootfsId: String): File = File(rootfsBaseDir, rootfsId)
     fun getDriverDir(driverId: String): File = File(driversBaseDir, driverId)
+    fun getTurnipDriverDir(version: String): File = File(turnipDriversBaseDir, version)
     fun getRuntimeSocketDir(sessionId: String): File = File(runtimeBaseDir, sessionId)
 
     fun ensureDirectoriesExist() {
         if (!filesDir.exists()) filesDir.mkdirs()
         if (!rootfsBaseDir.exists()) rootfsBaseDir.mkdirs()
         if (!driversBaseDir.exists()) driversBaseDir.mkdirs()
+        if (!turnipDriversBaseDir.exists()) turnipDriversBaseDir.mkdirs()
         if (!runtimeBaseDir.exists()) runtimeBaseDir.mkdirs()
         if (!prootTmpDir.exists()) prootTmpDir.mkdirs()
     }

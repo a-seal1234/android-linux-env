@@ -51,26 +51,30 @@ object EnvironmentGenerator {
 
         // 5. GPU driver acceleration environment
         when (profile.gpu.driverMode) {
-            StackProfile.DriverMode.TURNIP_KGSL -> {
-                env["VK_ICD_FILENAMES"] = "/opt/turnip/share/vulkan/icd.d/freedreno_icd.aarch64.json"
-                env["LIBGL_DRIVERS_PATH"] = "/opt/turnip/lib/dri"
-                env["LD_LIBRARY_PATH"] = "/opt/turnip/lib"
-                env["MESA_LOADER_DRIVER_OVERRIDE"] = "kgsl"
-            }
-            StackProfile.DriverMode.TURNIP_ZINK -> {
-                env["VK_ICD_FILENAMES"] = "/opt/turnip/share/vulkan/icd.d/freedreno_icd.aarch64.json"
-                env["LIBGL_DRIVERS_PATH"] = "/opt/turnip/lib/dri"
-                env["LD_LIBRARY_PATH"] = "/opt/turnip/lib"
+            StackProfile.DriverMode.TURNIP_KGSL, StackProfile.DriverMode.TURNIP_ZINK -> {
+                val icdPath = "/opt/drivers/turnip/active/freedreno_icd.aarch64.json"
+                env["VK_ICD_FILENAMES"] = icdPath
+                env["VK_DRIVER_FILES"] = icdPath
+                env["LIBGL_DRIVERS_PATH"] = "/opt/drivers/turnip/active/lib/dri"
+                env["LD_LIBRARY_PATH"] = "/opt/drivers/turnip/active/lib"
                 env["MESA_LOADER_DRIVER_OVERRIDE"] = "zink"
+                env["GALLIUM_DRIVER"] = "zink"
+                if (profile.gpu.tuDebugNoConform) {
+                    env["TU_DEBUG"] = "noconform"
+                }
             }
             StackProfile.DriverMode.ADRENO_PROPRIETARY_ZINK -> {
-                env["VK_ICD_FILENAMES"] = "/opt/turnip/share/vulkan/icd.d/adreno_icd.aarch64.json"
-                env["LIBGL_DRIVERS_PATH"] = "/opt/turnip/lib/dri"
-                env["LD_LIBRARY_PATH"] = "/opt/turnip/lib"
+                val icdPath = "/opt/drivers/turnip/active/adreno_icd.aarch64.json"
+                env["VK_ICD_FILENAMES"] = icdPath
+                env["VK_DRIVER_FILES"] = icdPath
+                env["LIBGL_DRIVERS_PATH"] = "/opt/drivers/turnip/active/lib/dri"
+                env["LD_LIBRARY_PATH"] = "/opt/drivers/turnip/active/lib"
                 env["MESA_LOADER_DRIVER_OVERRIDE"] = "zink"
+                env["GALLIUM_DRIVER"] = "zink"
             }
             StackProfile.DriverMode.LLVMPIPE -> {
                 env["MESA_LOADER_DRIVER_OVERRIDE"] = "llvmpipe"
+                env["GALLIUM_DRIVER"] = "llvmpipe"
                 env["LIBGL_ALWAYS_SOFTWARE"] = "1"
             }
             StackProfile.DriverMode.VIRGL -> {

@@ -53,7 +53,8 @@ data class StackProfile(
         val externalDriverId: String,
         val kgslNode: String = "/dev/kgsl-3d0",
         val mesaLoaderOverride: String? = null,
-        val environmentOverrides: Map<String, String> = emptyMap()
+        val environmentOverrides: Map<String, String> = emptyMap(),
+        val tuDebugNoConform: Boolean = false
     )
 
     enum class DriverMode {
@@ -141,6 +142,7 @@ data class StackProfile(
                 put("externalDriverId", gpu.externalDriverId)
                 put("kgslNode", gpu.kgslNode)
                 gpu.mesaLoaderOverride?.let { put("mesaLoaderOverride", it) }
+                put("tuDebugNoConform", gpu.tuDebugNoConform)
                 put("environmentOverrides", JSONObject(gpu.environmentOverrides))
             })
             put("display", JSONObject().apply {
@@ -237,7 +239,8 @@ data class StackProfile(
                     externalDriverId = gpuObj.getString("externalDriverId"),
                     kgslNode = gpuObj.optString("kgslNode", "/dev/kgsl-3d0"),
                     mesaLoaderOverride = gpuObj.optString("mesaLoaderOverride").takeIf { it.isNotBlank() },
-                    environmentOverrides = envOverrides
+                    environmentOverrides = envOverrides,
+                    tuDebugNoConform = gpuObj.optBoolean("tuDebugNoConform", false)
                 ),
                 display = DisplayConfig(
                     resolutionMode = ResolutionMode.valueOf(displayObj.optString("resolutionMode", "NATIVE").uppercase()),
@@ -294,9 +297,10 @@ data class StackProfile(
                 ),
                 gpu = GpuConfig(
                     driverMode = DriverMode.TURNIP_KGSL,
-                    externalDriverId = "turnip-mesa-24.3-adreno825",
+                    externalDriverId = "turnip-mesa-25.0-adreno825",
                     kgslNode = "/dev/kgsl-3d0",
-                    mesaLoaderOverride = "kgsl",
+                    mesaLoaderOverride = "zink",
+                    tuDebugNoConform = true,
                     environmentOverrides = mapOf(
                         "TU_DEBUG" to "noconform",
                         "MESA_VK_WSI_PRESENT_MODE" to "mailbox"

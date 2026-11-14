@@ -29,10 +29,12 @@ class EnvironmentGeneratorTest {
         assertEquals("/home/alw/.cache/go-build", env["GOCACHE"])
 
         // Turnip KGSL variables
-        assertEquals("/opt/turnip/share/vulkan/icd.d/freedreno_icd.aarch64.json", env["VK_ICD_FILENAMES"])
-        assertEquals("/opt/turnip/lib/dri", env["LIBGL_DRIVERS_PATH"])
-        assertEquals("/opt/turnip/lib", env["LD_LIBRARY_PATH"])
-        assertEquals("kgsl", env["MESA_LOADER_DRIVER_OVERRIDE"])
+        assertEquals("/opt/drivers/turnip/active/freedreno_icd.aarch64.json", env["VK_ICD_FILENAMES"])
+        assertEquals("/opt/drivers/turnip/active/freedreno_icd.aarch64.json", env["VK_DRIVER_FILES"])
+        assertEquals("/opt/drivers/turnip/active/lib/dri", env["LIBGL_DRIVERS_PATH"])
+        assertEquals("/opt/drivers/turnip/active/lib", env["LD_LIBRARY_PATH"])
+        assertEquals("zink", env["MESA_LOADER_DRIVER_OVERRIDE"])
+        assertEquals("zink", env["GALLIUM_DRIVER"])
         assertEquals("noconform", env["TU_DEBUG"])
     }
 
@@ -47,8 +49,10 @@ class EnvironmentGeneratorTest {
         val runtimeDir = File("/tmp/runtime-0")
         val env = EnvironmentGenerator.generateEnvironment(profile, runtimeDir)
 
-        assertEquals("/opt/turnip/share/vulkan/icd.d/adreno_icd.aarch64.json", env["VK_ICD_FILENAMES"])
+        assertEquals("/opt/drivers/turnip/active/adreno_icd.aarch64.json", env["VK_ICD_FILENAMES"])
+        assertEquals("/opt/drivers/turnip/active/adreno_icd.aarch64.json", env["VK_DRIVER_FILES"])
         assertEquals("zink", env["MESA_LOADER_DRIVER_OVERRIDE"])
+        assertEquals("zink", env["GALLIUM_DRIVER"])
     }
 
     @Test
@@ -59,7 +63,9 @@ class EnvironmentGeneratorTest {
 
         assertEquals("LabWC", env["XDG_CURRENT_DESKTOP"])
         assertEquals("llvmpipe", env["MESA_LOADER_DRIVER_OVERRIDE"])
+        assertEquals("llvmpipe", env["GALLIUM_DRIVER"])
         assertEquals("1", env["LIBGL_ALWAYS_SOFTWARE"])
         assertNull(env["VK_ICD_FILENAMES"])
+        assertNull(env["VK_DRIVER_FILES"])
     }
 }

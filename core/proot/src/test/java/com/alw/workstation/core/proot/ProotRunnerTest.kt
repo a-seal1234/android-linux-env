@@ -26,7 +26,7 @@ class ProotRunnerTest {
             filesDir = tempDir,
             nativeLibDir = File(tempFolder.root, "nativeLib").apply { mkdirs() }.absolutePath
         )
-        runner = ProotRunner(dirs, prootBinaryPath = "/data/app/lib/lib_proot.so")
+        runner = ProotRunner(dirs, prootBinaryPath = "/data/app/lib/lib_proot.so", kgslNodeChecker = { true })
     }
 
     @Test
@@ -45,6 +45,7 @@ class ProotRunnerTest {
         assertTrue(cmd.arguments.contains("/proc"))
         assertTrue(cmd.arguments.contains("/dev"))
         assertTrue(cmd.arguments.contains("/sys"))
+        assertTrue(cmd.arguments.contains("/dev/kgsl-3d0"))
 
         // Check build cache redirection env vars
         val envArgs = cmd.arguments.filter { it.contains("=") }
@@ -54,8 +55,11 @@ class ProotRunnerTest {
         assertTrue(envArgs.any { it.startsWith("GOCACHE=/home/alw/.cache/go-build") })
 
         // Check Turnip KGSL driver env vars
-        assertTrue(envArgs.any { it.startsWith("VK_ICD_FILENAMES=/opt/turnip/share/vulkan/icd.d/freedreno_icd.aarch64.json") })
-        assertTrue(envArgs.any { it.startsWith("MESA_LOADER_DRIVER_OVERRIDE=kgsl") })
+        assertTrue(envArgs.any { it.startsWith("VK_ICD_FILENAMES=/opt/drivers/turnip/active/freedreno_icd.aarch64.json") })
+        assertTrue(envArgs.any { it.startsWith("VK_DRIVER_FILES=/opt/drivers/turnip/active/freedreno_icd.aarch64.json") })
+        assertTrue(envArgs.any { it.startsWith("MESA_LOADER_DRIVER_OVERRIDE=zink") })
+        assertTrue(envArgs.any { it.startsWith("GALLIUM_DRIVER=zink") })
+        assertTrue(envArgs.any { it.startsWith("TU_DEBUG=noconform") })
 
         // Check compositor exec
         assertTrue(cmd.arguments.contains("Hyprland"))
@@ -91,8 +95,29 @@ class ProotRunnerTest {
         val cmd = runner.buildLaunchCommand(proprietaryProfile, sessionRuntimeDir)
 
         val envArgs = cmd.arguments.filter { it.contains("=") }
-        assertTrue(envArgs.any { it.startsWith("VK_ICD_FILENAMES=/opt/turnip/share/vulkan/icd.d/adreno_icd.aarch64.json") })
+        assertTrue(envArgs.any { it.startsWith("VK_ICD_FILENAMES=/opt/drivers/turnip/active/adreno_icd.aarch64.json") })
         assertTrue(envArgs.any { it.startsWith("MESA_LOADER_DRIVER_OVERRIDE=zink") })
+        assertTrue(envArgs.any { it.startsWith("GALLIUM_DRIVER=zink") })
+    }
+
+    @Test
+    fun testKgslUnavailableFallsBackToLlvmpipe() {
+        val fallbackRunner = ProotRunner(dirs, prootBinaryPath = "/data/app/lib/lib_proot.so", kgslNodeChecker = { false })
+        val profile = StackProfile.defaultArchXiaomiPad8()
+        val sessionRuntimeDir = File(tempDir, "runtime/session-fallback")
+
+        val cmd = fallbackRunner.buildLaunchCommand(profile, sessionRuntimeDir)
+
+        // Verify /dev/kgsl-3d0 is NOT bound
+        assertFalse(cmd.arguments.contains("/dev/kgsl-3d0"))
+
+        // Verify LLVMPIPE fallback environment
+        val envArgs = cmd.arguments.filter { it.contains("=") }
+        assertTrue(envArgs.any { it.startsWith("MESA_LOADER_DRIVER_OVERRIDE=llvmpipe") })
+        assertTrue(envArgs.any { it.startsWith("GALLIUM_DRIVER=llvmpipe") })
+        assertTrue(envArgs.any { it.startsWith("LIBGL_ALWAYS_SOFTWARE=1") })
+        assertFalse(envArgs.any { it.startsWith("VK_ICD_FILENAMES=") })
+        assertFalse(envArgs.any { it.startsWith("VK_DRIVER_FILES=") })
     }
 
     @Test

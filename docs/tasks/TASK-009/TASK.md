@@ -43,7 +43,7 @@ Implement the shared Turnip GPU driver manager and direct KGSL node binding subs
 
 ## 3. Dependencies & Gates
 
-- **Prerequisites:** TASK-007.
-- **Implementation Gate:** Pending completion of TASK-007 and TASK-008.
-- **Verification Gate:** Pending.
-- **Review Gate:** Pending.
+- **Prerequisites:** TASK-007, TASK-008 (Completed).
+- **Implementation Gate:** Passed. Shared Turnip driver store (`files/drivers/turnip/<version>/`), GitHub release client, SHA256 verification, ELF glibc vs Bionic validator, ICD generator, and KGSL fallback implemented.
+- **Verification Gate:** Passed. 17 unit tests in `core:proot` (46 total in module, 73 project-wide) and full `./gradlew assembleDebug` passed.
+- **Review Gate:** Passed. Evidence recorded in [evidence/verification.md](evidence/verification.md).

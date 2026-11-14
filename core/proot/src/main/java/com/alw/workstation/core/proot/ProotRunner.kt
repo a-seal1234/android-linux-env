@@ -9,13 +9,14 @@ import java.io.File
 /**
  * Execution harness for PRoot v5.4.0+ in unrooted Android user-space.
  * Incorporates rootfs directory isolation, hardware node bindings, selective storage bridge,
- * build cache redirection, and transparent x86_64 translation hooks.
+ * build cache redirection, shared Turnip driver store binding, and transparent x86_64 translation hooks.
  */
 class ProotRunner(
     private val dirs: RuntimeDirectories,
     private val prootBinaryPath: String = dirs.prootLibPath,
     private val storageBridge: com.alw.workstation.core.proot.storage.StorageBridgeManager =
-        com.alw.workstation.core.proot.storage.StorageBridgeManager(dirs)
+        com.alw.workstation.core.proot.storage.StorageBridgeManager(dirs),
+    private val kgslNodeChecker: (String) -> Boolean = { File(it).exists() }
 ) {
     companion object {
         private const val TAG = "ALW::ProotRunner"
@@ -77,13 +78,15 @@ class ProotRunner(
             args.add("/dev/shm")
         }
 
-        // 5. Direct Adreno KGSL hardware GPU device node
-        val kgslNode = File(profile.gpu.kgslNode)
-        if (kgslNode.exists()) {
+        // 5. Direct Adreno KGSL hardware GPU device node & Fallback check
+        val isKgslAccessible = kgslNodeChecker(profile.gpu.kgslNode)
+        val requiresKgsl = profile.gpu.driverMode != StackProfile.DriverMode.LLVMPIPE
+
+        if (requiresKgsl && isKgslAccessible) {
             args.add("-b")
             args.add(profile.gpu.kgslNode)
-        } else {
-            Log.w(TAG, "KGSL device node does not exist on host: ${profile.gpu.kgslNode}")
+        } else if (requiresKgsl && !isKgslAccessible) {
+            Log.w(TAG, "KGSL device node ${profile.gpu.kgslNode} is not accessible on host. Cleanly falling back to LLVMPIPE software rasterizer.")
         }
 
         // 6. XDG runtime socket directory (wayland-0, PipeWire audio socket)
@@ -93,10 +96,14 @@ class ProotRunner(
         args.add("-b")
         args.add("${sessionRuntimeDir.absolutePath}:/tmp/runtime-alw")
 
-        // 7. External Mesa Turnip / Adreno driver package mount
+        // 7. External Mesa Turnip / Adreno driver package mount (shared driver store)
         if (profile.gpu.externalDriverId.isNotBlank() && profile.gpu.externalDriverId != "system-fallback") {
-            val driverDir = dirs.getDriverDir(profile.gpu.externalDriverId)
+            val driverDir = dirs.getTurnipDriverDir(profile.gpu.externalDriverId).takeIf { it.exists() }
+                ?: dirs.getDriverDir(profile.gpu.externalDriverId)
             if (driverDir.exists()) {
+                args.add("-b")
+                args.add("${driverDir.absolutePath}:/opt/drivers/turnip/active:ro")
+                // Backwards-compatible /opt/turnip mount
                 args.add("-b")
                 args.add("${driverDir.absolutePath}:/opt/turnip:ro")
             }
@@ -124,8 +131,24 @@ class ProotRunner(
         args.add("-w")
         args.add(userHome)
 
-        // 11. Environment variables from EnvironmentGenerator
-        val env = EnvironmentGenerator.generateEnvironment(profile, sessionRuntimeDir)
+        // 11. Environment variables from EnvironmentGenerator (with safe LLVMPIPE fallback if KGSL missing)
+        val env = if (requiresKgsl && !isKgslAccessible) {
+            val fallbackProfile = profile.copy(
+                gpu = profile.gpu.copy(
+                    driverMode = StackProfile.DriverMode.LLVMPIPE,
+                    mesaLoaderOverride = "llvmpipe"
+                )
+            )
+            val fallbackEnv = EnvironmentGenerator.generateEnvironment(fallbackProfile, sessionRuntimeDir).toMutableMap()
+            fallbackEnv["LIBGL_ALWAYS_SOFTWARE"] = "1"
+            fallbackEnv["MESA_LOADER_DRIVER_OVERRIDE"] = "llvmpipe"
+            fallbackEnv["GALLIUM_DRIVER"] = "llvmpipe"
+            fallbackEnv.remove("VK_ICD_FILENAMES")
+            fallbackEnv.remove("VK_DRIVER_FILES")
+            fallbackEnv
+        } else {
+            EnvironmentGenerator.generateEnvironment(profile, sessionRuntimeDir)
+        }
 
         args.add("/usr/bin/env")
         args.add("-i")
