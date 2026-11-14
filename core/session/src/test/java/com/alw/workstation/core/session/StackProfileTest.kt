@@ -3,6 +3,7 @@ package com.alw.workstation.core.session
 import com.alw.workstation.core.session.model.StackProfile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -57,5 +58,27 @@ class StackProfileTest {
         assertEquals("1.0.0", json.getString("schemaVersion"))
         assertEquals("arch-xiaomi-pad-8", json.getString("id"))
         assertEquals("turnip_kgsl", json.getJSONObject("gpu").getString("driverMode"))
+
+        val parsed = StackProfile.fromJson(json)
+        assertEquals(profile.id, parsed.id)
+        assertEquals(profile.name, parsed.name)
+        assertEquals(profile.distro.rootfsId, parsed.distro.rootfsId)
+        assertEquals(profile.compositor.type, parsed.compositor.type)
+        assertEquals(profile.gpu.driverMode, parsed.gpu.driverMode)
+        assertEquals(profile.display.scaleFactor, parsed.display.scaleFactor)
+        assertEquals(profile.display.refreshRateHz, parsed.display.refreshRateHz)
+        assertEquals(profile.storage.bindSdcard, parsed.storage.bindSdcard)
+        assertEquals(profile.input.requestPointerCapture, parsed.input.requestPointerCapture)
+    }
+
+    @Test
+    fun testFromJsonString() {
+        val original = StackProfile.safeModeProfile()
+        val jsonString = original.toJson().toString()
+        val reconstructed = StackProfile.fromJsonString(jsonString)
+
+        assertEquals("safe-mode", reconstructed.id)
+        assertEquals(StackProfile.CompositorType.LABWC, reconstructed.compositor.type)
+        assertEquals(StackProfile.DriverMode.LLVMPIPE, reconstructed.gpu.driverMode)
     }
 }

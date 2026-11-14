@@ -175,6 +175,105 @@ data class StackProfile(
     }
 
     companion object {
+        fun fromJson(json: JSONObject): StackProfile {
+            val distroObj = json.getJSONObject("distro")
+            val compObj = json.getJSONObject("compositor")
+            val gpuObj = json.getJSONObject("gpu")
+            val displayObj = json.getJSONObject("display")
+            val storageObj = json.getJSONObject("storage")
+            val inputObj = json.getJSONObject("input")
+            val emuObj = json.optJSONObject("emulation")
+
+            val extraArgsList = mutableListOf<String>()
+            val extraArgsArray = compObj.optJSONArray("extraArgs")
+            if (extraArgsArray != null) {
+                for (i in 0 until extraArgsArray.length()) {
+                    extraArgsList.add(extraArgsArray.getString(i))
+                }
+            }
+
+            val envOverrides = mutableMapOf<String, String>()
+            val envObj = gpuObj.optJSONObject("environmentOverrides")
+            if (envObj != null) {
+                val keys = envObj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    envOverrides[k] = envObj.getString(k)
+                }
+            }
+
+            val excludeList = mutableListOf<String>()
+            val excludeArray = storageObj.optJSONArray("excludePaths")
+            if (excludeArray != null) {
+                for (i in 0 until excludeArray.length()) {
+                    excludeList.add(excludeArray.getString(i))
+                }
+            } else {
+                excludeList.addAll(listOf("/storage/emulated/0/Android/data", "/storage/emulated/0/Android/obb"))
+            }
+
+            val cacheObj = storageObj.optJSONObject("cacheRedirection")
+
+            return StackProfile(
+                schemaVersion = json.optString("schemaVersion", "1.0.0"),
+                id = json.getString("id"),
+                name = json.getString("name"),
+                distro = DistroConfig(
+                    rootfsId = distroObj.getString("rootfsId"),
+                    architecture = distroObj.optString("architecture", "aarch64"),
+                    defaultUser = distroObj.optString("defaultUser", "alw"),
+                    shell = distroObj.optString("shell", "/bin/zsh")
+                ),
+                compositor = CompositorConfig(
+                    type = CompositorType.valueOf(compObj.getString("type").uppercase()),
+                    execCommand = compObj.getString("execCommand"),
+                    configMode = ConfigMode.valueOf(compObj.optString("configMode", "WRAP_AND_OVERRIDE").uppercase()),
+                    userConfigPath = compObj.optString("userConfigPath").takeIf { it.isNotBlank() },
+                    sessionConfigPath = compObj.optString("sessionConfigPath", "/tmp/android-session.conf"),
+                    extraArgs = extraArgsList
+                ),
+                gpu = GpuConfig(
+                    driverMode = DriverMode.valueOf(gpuObj.getString("driverMode").uppercase()),
+                    externalDriverId = gpuObj.getString("externalDriverId"),
+                    kgslNode = gpuObj.optString("kgslNode", "/dev/kgsl-3d0"),
+                    mesaLoaderOverride = gpuObj.optString("mesaLoaderOverride").takeIf { it.isNotBlank() },
+                    environmentOverrides = envOverrides
+                ),
+                display = DisplayConfig(
+                    resolutionMode = ResolutionMode.valueOf(displayObj.optString("resolutionMode", "NATIVE").uppercase()),
+                    customWidth = if (displayObj.has("customWidth")) displayObj.getInt("customWidth") else null,
+                    customHeight = if (displayObj.has("customHeight")) displayObj.getInt("customHeight") else null,
+                    scaleFactor = displayObj.optDouble("scaleFactor", 1.75).toFloat(),
+                    refreshRateHz = displayObj.optInt("refreshRateHz", 144)
+                ),
+                storage = StorageConfig(
+                    bindSdcard = storageObj.optBoolean("bindSdcard", true),
+                    sdcardMountPoint = storageObj.optString("sdcardMountPoint", "/mnt/sdcard"),
+                    excludePaths = excludeList,
+                    cacheRedirection = CacheRedirectionConfig(
+                        enabled = cacheObj?.optBoolean("enabled", true) ?: true,
+                        internalBaseDir = cacheObj?.optString("internalBaseDir", "/home/alw/.cache") ?: "/home/alw/.cache"
+                    ),
+                    enableSymlink2File = storageObj.optBoolean("enableSymlink2File", true)
+                ),
+                input = InputConfig(
+                    requestPointerCapture = inputObj.optBoolean("requestPointerCapture", true),
+                    rebindCapsToSuper = inputObj.optBoolean("rebindCapsToSuper", true),
+                    touchpadNaturalScroll = inputObj.optBoolean("touchpadNaturalScroll", true),
+                    xkbOptions = inputObj.optString("xkbOptions", "caps:super")
+                ),
+                emulation = EmulationConfig(
+                    enabled = emuObj?.optBoolean("enabled", false) ?: false,
+                    engine = EmulationEngine.valueOf(emuObj?.optString("engine", "FEX")?.uppercase() ?: "FEX"),
+                    thunkLibsEnabled = emuObj?.optBoolean("thunkLibsEnabled", true) ?: true
+                )
+            )
+        }
+
+        fun fromJsonString(jsonString: String): StackProfile {
+            return fromJson(JSONObject(jsonString))
+        }
+
         fun defaultArchXiaomiPad8(): StackProfile {
             return StackProfile(
                 id = "arch-xiaomi-pad-8",
