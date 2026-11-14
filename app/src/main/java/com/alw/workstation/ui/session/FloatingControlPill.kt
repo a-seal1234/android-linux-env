@@ -55,6 +55,9 @@ fun FloatingControlPill(
     onSwitchInputProfile: (InputProfile) -> Unit,
     onSetVolume: (Float) -> Unit,
     onStopSession: () -> Unit,
+    onReloadHyprland: (() -> Unit)? = null,
+    onRegenerateDotfiles: (() -> Unit)? = null,
+    onToggleSafeMode: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var isExpanded by remember { mutableStateOf(false) }
@@ -237,6 +240,38 @@ fun FloatingControlPill(
                         valueRange = 0f..1f,
                         modifier = Modifier.fillMaxWidth()
                     )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Live Compositor Actions
+                    Text(
+                        text = "Compositor & Dotfiles",
+                        color = Color.LightGray,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { onReloadHyprland?.invoke() },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Reload IPC", fontSize = 10.sp, color = Color.White)
+                        }
+
+                        OutlinedButton(
+                            onClick = { onRegenerateDotfiles?.invoke() },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Reset Dotfiles", fontSize = 10.sp, color = Color.White)
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(10.dp))
 

@@ -1,5 +1,6 @@
 package com.alw.workstation.ui.wizard
 
+import com.alw.workstation.core.proot.RootfsDownloader
 import com.alw.workstation.core.proot.RootfsExtractor
 import com.alw.workstation.core.proot.RootfsManager
 import com.alw.workstation.core.proot.RuntimeDirectories
@@ -30,6 +31,7 @@ class WizardViewModel(
     private val dirs: RuntimeDirectories,
     private val rootfsManager: RootfsManager = RootfsManager(dirs),
     private val rootfsExtractor: RootfsExtractor = RootfsExtractor(dirs),
+    private val rootfsDownloader: RootfsDownloader = RootfsDownloader(dirs),
     private val driverManager: TurnipDriverManager = TurnipDriverManager(dirs),
     private val releaseFetcher: GitHubReleaseFetcher = GitHubReleaseFetcher(),
     private val provisioner: ArchProvisioner? = null,
@@ -255,8 +257,8 @@ class WizardViewModel(
                 val state = _uiState.value
                 val rootfsDir = dirs.getRootfsDir(state.rootfsId)
 
-                // 1. Ensure target rootfs exists
-                if (!rootfsDir.exists()) {
+                // 1. Ensure target rootfs exists and is extracted/valid
+                if (!rootfsManager.isRootfsValid(state.rootfsId)) {
                     if (state.rootfsSource == RootfsSourceType.LOCAL_ARCHIVE && state.localRootfsPath != null) {
                         _uiState.update {
                             it.copy(
@@ -270,13 +272,85 @@ class WizardViewModel(
                             throw IllegalStateException("Failed to extract rootfs archive: ${result.errorMessage}")
                         }
                     } else {
-                        rootfsManager.createRootfs(state.rootfsId)
+                        // Official Arch Linux ARM aarch64 stream download with mirror failover
+                        _uiState.update {
+                            it.copy(
+                                isDownloadingRootfs = true,
+                                provisioningStepDescription = "Downloading Arch Linux ARM aarch64 rootfs..."
+                            )
+                        }
+                        val tarball = rootfsDownloader.downloadRootfs(
+                            onProgress = { progress ->
+                                val speedMb = (progress.speedBytesPerSec / 1024.0 / 1024.0)
+                                val downloadedMb = progress.bytesDownloaded / 1024 / 1024
+                                val totalMb = progress.totalBytes?.let { it / 1024 / 1024 }
+                                val desc = if (totalMb != null) {
+                                    "Downloading rootfs: $downloadedMb MB / $totalMb MB (${progress.percent}%) · %.1f MB/s".format(speedMb)
+                                } else {
+                                    "Downloading rootfs: $downloadedMb MB · %.1f MB/s".format(speedMb)
+                                }
+                                _uiState.update { current ->
+                                    current.copy(
+                                        downloadProgressFraction = progress.percent / 100f,
+                                        downloadSpeedBytesPerSec = progress.speedBytesPerSec,
+                                        provisioningStepDescription = desc,
+                                        provisioningLogs = (current.provisioningLogs + desc).takeLast(200)
+                                    )
+                                }
+                            }
+                        )
+
+                        _uiState.update {
+                            it.copy(
+                                isDownloadingRootfs = false,
+                                isExtractingRootfs = true,
+                                provisioningStepDescription = "Extracting Arch Linux ARM rootfs archive..."
+                            )
+                        }
+
+                        val result = rootfsExtractor.extractArchiveFile(
+                            archiveFile = tarball,
+                            targetDir = rootfsDir,
+                            onProgress = { progress ->
+                                val desc = "Extracting rootfs: ${progress.entriesExtracted} entries extracted"
+                                _uiState.update { current ->
+                                    current.copy(
+                                        provisioningStepDescription = desc,
+                                        extractionProgressFraction = progress.totalBytes?.let {
+                                            (progress.bytesExtracted.toFloat() / it).coerceIn(0f, 1f)
+                                        } ?: 0f
+                                    )
+                                }
+                            }
+                        )
+
+                        if (!result.isSuccess) {
+                            throw IllegalStateException("Failed to extract Arch Linux ARM rootfs: ${result.errorMessage}")
+                        }
                     }
+                }
+
+                _uiState.update {
+                    it.copy(
+                        isDownloadingRootfs = false,
+                        isExtractingRootfs = false
+                    )
                 }
 
                 // 2. Build target StackProfile
                 val profile = buildTargetProfile()
                 profileRepository?.saveProfile(profile)
+
+                // 2.1 Ensure selected Turnip KGSL driver is installed if online release chosen
+                if (state.driverOption == DriverStoreOption.ONLINE_RELEASE && state.selectedReleaseTag != null) {
+                    val release = state.availableReleases.firstOrNull { it.releaseTag == state.selectedReleaseTag }
+                    if (release != null && !driverManager.isDriverInstalled(release.version)) {
+                        _uiState.update {
+                            it.copy(provisioningStepDescription = "Installing Turnip KGSL driver ${release.version}...")
+                        }
+                        driverManager.installDriverRelease(release)
+                    }
+                }
 
                 // 3. Run Provisioning sequence if provisioner is supplied
                 if (provisioner != null) {

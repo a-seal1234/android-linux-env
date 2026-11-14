@@ -72,6 +72,39 @@ class TurnipDriverManager(
     }
 
     /**
+     * Checks if a driver version is installed and valid in the shared store.
+     */
+    fun isDriverInstalled(version: String): Boolean {
+        return getInstalledDriver(version) != null
+    }
+
+    /**
+     * Downloads and installs a GitHub driver release into the shared store.
+     */
+    fun installDriverRelease(
+        release: DriverRelease,
+        onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null
+    ): TurnipDriverManifest {
+        val tempDir = File(dirs.prootTmpDir, "driver_downloads")
+        tempDir.mkdirs()
+        val tempFile = File(tempDir, release.archiveName)
+        try {
+            releaseFetcher.downloadRelease(release, tempFile, onProgress)
+            return installDriverArchive(
+                version = release.version,
+                archiveFile = tempFile,
+                expectedSha256 = release.sha256Checksum,
+                isProprietary = false,
+                releaseTag = release.releaseTag
+            )
+        } finally {
+            if (tempFile.exists()) {
+                tempFile.delete()
+            }
+        }
+    }
+
+    /**
      * Installs a driver archive into the shared store with cryptographic and ELF validation.
      */
     fun installDriverArchive(

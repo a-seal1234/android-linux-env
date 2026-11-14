@@ -485,10 +485,12 @@ fun Step3Provisioning(
         Spacer(modifier = Modifier.height(16.dp))
 
         // Progress Bar & Step Milestone
-        val progressFraction = if (state.provisioningTotalSteps > 0) {
-            state.provisioningStep.toFloat() / state.provisioningTotalSteps.toFloat()
-        } else {
-            0f
+        val progressFraction = when {
+            state.isComplete -> 1f
+            state.isDownloadingRootfs -> (state.downloadProgressFraction * 0.5f).coerceIn(0f, 0.5f)
+            state.isExtractingRootfs -> (0.5f + state.extractionProgressFraction * 0.5f).coerceIn(0.5f, 1f)
+            state.provisioningTotalSteps > 0 -> (state.provisioningStep.toFloat() / state.provisioningTotalSteps.toFloat()).coerceIn(0f, 1f)
+            else -> 0f
         }
 
         LinearProgressIndicator(

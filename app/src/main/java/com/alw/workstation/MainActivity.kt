@@ -30,8 +30,12 @@ import com.alw.workstation.core.session.ProfileRepository
 import com.alw.workstation.core.session.SessionController
 import com.alw.workstation.core.session.SessionState
 import com.alw.workstation.service.WorkstationService
+import com.alw.workstation.ui.configurator.StackConfiguratorScreen
+import com.alw.workstation.ui.configurator.StackConfiguratorViewModel
 import com.alw.workstation.ui.dashboard.DashboardScreen
 import com.alw.workstation.ui.dashboard.DashboardViewModel
+import com.alw.workstation.ui.driverstore.DriverStoreScreen
+import com.alw.workstation.ui.driverstore.DriverStoreViewModel
 import com.alw.workstation.ui.session.SessionSurfaceScreen
 import com.alw.workstation.ui.theme.WorkstationTheme
 import com.alw.workstation.ui.wizard.WizardScreen
@@ -40,7 +44,9 @@ import com.alw.workstation.ui.wizard.WizardViewModel
 enum class AppScreen {
     WIZARD,
     DASHBOARD,
-    SESSION
+    SESSION,
+    CONFIGURATOR,
+    DRIVER_STORE
 }
 
 class MainActivity : ComponentActivity() {
@@ -63,6 +69,8 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var wizardViewModel: WizardViewModel
     private lateinit var dashboardViewModel: DashboardViewModel
+    private lateinit var stackConfiguratorViewModel: StackConfiguratorViewModel
+    private lateinit var driverStoreViewModel: DriverStoreViewModel
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -112,11 +120,26 @@ class MainActivity : ComponentActivity() {
             audioBridgeManager = audioBridgeManager
         )
 
+        stackConfiguratorViewModel = StackConfiguratorViewModel(
+            dirs = dirs,
+            profileRepository = profileRepository,
+            rootfsManager = rootfsManager,
+            driverManager = driverManager
+        )
+
+        driverStoreViewModel = DriverStoreViewModel(
+            dirs = dirs,
+            driverManager = driverManager,
+            releaseFetcher = releaseFetcher
+        )
+
         setContent {
             WorkstationTheme {
                 WorkstationAppRoot(
                     wizardViewModel = wizardViewModel,
                     dashboardViewModel = dashboardViewModel,
+                    stackConfiguratorViewModel = stackConfiguratorViewModel,
+                    driverStoreViewModel = driverStoreViewModel,
                     serverManager = serverManager,
                     inputDispatcher = inputDispatcher,
                     rootfsManager = rootfsManager,
@@ -142,6 +165,8 @@ class MainActivity : ComponentActivity() {
 fun WorkstationAppRoot(
     wizardViewModel: WizardViewModel,
     dashboardViewModel: DashboardViewModel,
+    stackConfiguratorViewModel: StackConfiguratorViewModel,
+    driverStoreViewModel: DriverStoreViewModel,
     serverManager: WaylandServerManager,
     inputDispatcher: InputDispatcher,
     rootfsManager: RootfsManager,
@@ -179,6 +204,14 @@ fun WorkstationAppRoot(
                     },
                     onOpenWizard = {
                         currentScreen = AppScreen.WIZARD
+                    },
+                    onOpenConfigurator = { profileId ->
+                        stackConfiguratorViewModel.loadProfile(profileId)
+                        currentScreen = AppScreen.CONFIGURATOR
+                    },
+                    onOpenDriverStore = {
+                        driverStoreViewModel.refresh()
+                        currentScreen = AppScreen.DRIVER_STORE
                     }
                 )
             }
@@ -189,6 +222,28 @@ fun WorkstationAppRoot(
                     inputDispatcher = inputDispatcher,
                     onStopSession = {
                         onStopService()
+                        currentScreen = AppScreen.DASHBOARD
+                    }
+                )
+            }
+            AppScreen.CONFIGURATOR -> {
+                StackConfiguratorScreen(
+                    viewModel = stackConfiguratorViewModel,
+                    onBack = {
+                        dashboardViewModel.refresh()
+                        currentScreen = AppScreen.DASHBOARD
+                    },
+                    onOpenDriverStore = {
+                        driverStoreViewModel.refresh()
+                        currentScreen = AppScreen.DRIVER_STORE
+                    }
+                )
+            }
+            AppScreen.DRIVER_STORE -> {
+                DriverStoreScreen(
+                    viewModel = driverStoreViewModel,
+                    onBack = {
+                        dashboardViewModel.refresh()
                         currentScreen = AppScreen.DASHBOARD
                     }
                 )

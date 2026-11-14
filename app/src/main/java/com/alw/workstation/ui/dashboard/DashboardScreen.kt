@@ -45,7 +45,9 @@ import java.io.File
 fun DashboardScreen(
     viewModel: DashboardViewModel,
     onLaunchSession: () -> Unit,
-    onOpenWizard: () -> Unit
+    onOpenWizard: () -> Unit,
+    onOpenConfigurator: (String?) -> Unit = {},
+    onOpenDriverStore: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
     val scope = rememberCoroutineScope()
@@ -64,6 +66,7 @@ fun DashboardScreen(
             // Dashboard Header
             DashboardTopBar(
                 onOpenWizard = onOpenWizard,
+                onOpenDriverStore = onOpenDriverStore,
                 onRefresh = { viewModel.refresh() }
             )
 
@@ -75,7 +78,20 @@ fun DashboardScreen(
                 onLaunch = {
                     viewModel.launchSession(scope)
                     onLaunchSession()
+                },
+                onEdit = {
+                    onOpenConfigurator(state.activeProfile?.id)
                 }
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Live Compositor & Safe Mode Switcher Card
+            CompositorSwitcherCard(
+                profile = state.activeProfile,
+                onSwitchCompositor = { type -> viewModel.switchCompositor(type) },
+                onTriggerSafeMode = { viewModel.triggerSafeMode() },
+                onRegenerateDotfiles = { viewModel.regenerateDefaultDotfiles(scope) }
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -94,7 +110,9 @@ fun DashboardScreen(
             StackProfilesSection(
                 profiles = state.profiles,
                 activeProfile = state.activeProfile,
-                onSelectProfile = { viewModel.selectProfile(it) }
+                onSelectProfile = { viewModel.selectProfile(it) },
+                onEditProfile = { onOpenConfigurator(it.id) },
+                onCreateProfile = { onOpenConfigurator(null) }
             )
         }
     }
@@ -127,6 +145,7 @@ fun DashboardScreen(
 @Composable
 fun DashboardTopBar(
     onOpenWizard: () -> Unit,
+    onOpenDriverStore: () -> Unit = {},
     onRefresh: () -> Unit
 ) {
     Row(
@@ -151,6 +170,9 @@ fun DashboardTopBar(
             OutlinedButton(onClick = onRefresh) {
                 Text("Refresh")
             }
+            OutlinedButton(onClick = onOpenDriverStore) {
+                Text("Driver Store")
+            }
             Button(onClick = onOpenWizard) {
                 Text("+ Setup Wizard")
             }
@@ -161,7 +183,8 @@ fun DashboardTopBar(
 @Composable
 fun ActiveProfileHeroCard(
     profile: StackProfile?,
-    onLaunch: () -> Unit
+    onLaunch: () -> Unit,
+    onEdit: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -193,11 +216,16 @@ fun ActiveProfileHeroCard(
                     )
                 }
 
-                Button(
-                    onClick = onLaunch,
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    Text("Launch Workstation", fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onEdit) {
+                        Text("Configure")
+                    }
+                    Button(
+                        onClick = onLaunch,
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Text("Launch Workstation", fontWeight = FontWeight.Bold)
+                    }
                 }
             }
 
@@ -212,6 +240,62 @@ fun ActiveProfileHeroCard(
                     InfoPill(label = "GPU Acceleration", value = "${profile.gpu.driverMode}")
                     InfoPill(label = "Resolution", value = "${profile.display.customWidth ?: 3200}x${profile.display.customHeight ?: 2136} @ ${profile.display.refreshRateHz}Hz")
                     InfoPill(label = "Scale", value = "${profile.display.scaleFactor}x")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CompositorSwitcherCard(
+    profile: StackProfile?,
+    onSwitchCompositor: (StackProfile.CompositorType) -> Unit,
+    onTriggerSafeMode: () -> Unit,
+    onRegenerateDotfiles: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Compositor & Safe Mode Switcher",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Active: ${profile?.compositor?.type ?: "HYPRLAND"} · Display: ${profile?.display?.customWidth ?: 3200}x${profile?.display?.customHeight ?: 2136} @ ${profile?.display?.refreshRateHz ?: 144}Hz",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (profile?.compositor?.type == StackProfile.CompositorType.LABWC) {
+                        Button(
+                            onClick = { onSwitchCompositor(StackProfile.CompositorType.HYPRLAND) }
+                        ) {
+                            Text("Switch to Hyprland")
+                        }
+                    } else {
+                        Button(
+                            onClick = onTriggerSafeMode,
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                        ) {
+                            Text("One-Tap Safe Mode")
+                        }
+                    }
+                    OutlinedButton(onClick = onRegenerateDotfiles) {
+                        Text("Restore Default Dotfiles")
+                    }
                 }
             }
         }
@@ -344,14 +428,25 @@ fun WorkspaceCard(
 fun StackProfilesSection(
     profiles: List<StackProfile>,
     activeProfile: StackProfile?,
-    onSelectProfile: (StackProfile) -> Unit
+    onSelectProfile: (StackProfile) -> Unit,
+    onEditProfile: (StackProfile) -> Unit = {},
+    onCreateProfile: () -> Unit = {}
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = "Stack Profiles (${profiles.size})",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Stack Profiles (${profiles.size})",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Button(onClick = onCreateProfile) {
+                Text("+ New Profile")
+            }
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -379,7 +474,7 @@ fun StackProfilesSection(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(text = p.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
                         Text(
                             text = "Rootfs: ${p.distro.rootfsId} · Compositor: ${p.compositor.type} · Driver: ${p.gpu.driverMode}",
@@ -388,11 +483,16 @@ fun StackProfilesSection(
                         )
                     }
 
-                    if (isActive) {
-                        Text(text = "Active", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    } else {
-                        TextButton(onClick = { onSelectProfile(p) }) {
-                            Text("Select")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(onClick = { onEditProfile(p) }) {
+                            Text("Edit")
+                        }
+                        if (isActive) {
+                            Text(text = "Active", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        } else {
+                            TextButton(onClick = { onSelectProfile(p) }) {
+                                Text("Select")
+                            }
                         }
                     }
                 }

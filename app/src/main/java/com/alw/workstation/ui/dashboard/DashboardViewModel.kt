@@ -193,4 +193,58 @@ class DashboardViewModel(
         _uiState.update { it.copy(sessionState = SessionState.Stopped) }
         refresh()
     }
+
+    fun switchCompositor(type: StackProfile.CompositorType) {
+        val currentProfile = _uiState.value.activeProfile ?: StackProfile.defaultArchXiaomiPad8()
+        val updated = currentProfile.copy(
+            compositor = currentProfile.compositor.copy(type = type)
+        )
+        profileRepository.saveProfile(updated)
+        _uiState.update { it.copy(activeProfile = updated) }
+        refresh()
+    }
+
+    fun triggerSafeMode() {
+        val safeProfile = StackProfile.safeModeProfile()
+        profileRepository.saveProfile(safeProfile)
+        _uiState.update { it.copy(activeProfile = safeProfile) }
+        refresh()
+    }
+
+    fun regenerateDefaultDotfiles(scope: CoroutineScope) {
+        scope.launch(ioDispatcher) {
+            try {
+                val profile = _uiState.value.activeProfile ?: StackProfile.defaultArchXiaomiPad8()
+                val rootfsDir = dirs.getRootfsDir(profile.distro.rootfsId)
+                com.alw.workstation.core.session.ConfigSynthesizer.ensureDefaultConfigsExist(
+                    rootfsDir = rootfsDir,
+                    defaultUser = profile.distro.defaultUser,
+                    profile = profile
+                )
+                withContext(mainDispatcher) {
+                    _uiState.update { it.copy(errorMessage = "Default compositor dotfiles regenerated non-destructively in guest ~/.config/") }
+                }
+            } catch (e: Exception) {
+                withContext(mainDispatcher) {
+                    _uiState.update { it.copy(errorMessage = "Failed regenerating dotfiles: ${e.message}") }
+                }
+            }
+        }
+    }
+
+    fun sendHyprlandIpc(command: String, scope: CoroutineScope) {
+        scope.launch(ioDispatcher) {
+            val profile = _uiState.value.activeProfile ?: StackProfile.defaultArchXiaomiPad8()
+            val runtimeDir = dirs.getRuntimeSocketDir("session-${profile.id}")
+            val client = com.alw.workstation.core.session.HyprlandIpcClient(runtimeDir)
+            val result = client.sendCommand(command)
+            withContext(mainDispatcher) {
+                result.onSuccess { res ->
+                    _uiState.update { it.copy(errorMessage = "Hyprland IPC: $res") }
+                }.onFailure { err ->
+                    _uiState.update { it.copy(errorMessage = "Hyprland IPC error: ${err.message}") }
+                }
+            }
+        }
+    }
 }

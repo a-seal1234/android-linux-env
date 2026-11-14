@@ -27,6 +27,7 @@ fun SessionSurfaceScreen(
     onStopSession: () -> Unit
 ) {
     val state by dashboardViewModel.uiState.collectAsState()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     Box(
         modifier = Modifier
@@ -60,6 +61,15 @@ fun SessionSurfaceScreen(
             },
             onSetVolume = { vol ->
                 dashboardViewModel.audioBridgeManager.setVolume(vol)
+            },
+            onReloadHyprland = {
+                dashboardViewModel.sendHyprlandIpc("reload", scope)
+            },
+            onRegenerateDotfiles = {
+                dashboardViewModel.regenerateDefaultDotfiles(scope)
+            },
+            onToggleSafeMode = {
+                dashboardViewModel.triggerSafeMode()
             },
             onStopSession = {
                 dashboardViewModel.stopSession()

@@ -159,6 +159,11 @@ class WizardViewModelTest {
         val testDispatcher = StandardTestDispatcher(testScheduler)
         val testScope = TestScope(testDispatcher)
 
+        // Seed valid shell in rootfs so network download is skipped
+        val rootfsDir = dirs.getRootfsDir("archlinux-default")
+        val binDir = File(rootfsDir, "bin").apply { mkdirs() }
+        File(binDir, "sh").writeText("#!/bin/sh\nexit 0\n")
+
         val testViewModel = WizardViewModel(
             dirs = dirs,
             rootfsManager = rootfsManager,
@@ -169,6 +174,7 @@ class WizardViewModelTest {
             mainDispatcher = testDispatcher
         )
 
+        testViewModel.setDriverOption(DriverStoreOption.SOFTWARE_FALLBACK)
         testViewModel.startProvisioning(testScope)
         assertTrue(testViewModel.uiState.value.isProvisioning)
 

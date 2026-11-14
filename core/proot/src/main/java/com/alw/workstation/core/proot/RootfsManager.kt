@@ -90,6 +90,11 @@ class RootfsManager(private val dirs: RuntimeDirectories) {
     /**
      * Checks if a rootfs filesystem contains a usable shell interpreter.
      */
+    fun isRootfsValid(rootfsId: String): Boolean = checkRootfsValidity(dirs.getRootfsDir(rootfsId))
+
+    /**
+     * Checks if a rootfs filesystem contains a usable shell interpreter.
+     */
     fun checkRootfsValidity(rootfsDir: File): Boolean {
         if (!rootfsDir.exists() || !rootfsDir.isDirectory) return false
         val shellCandidates = listOf(
