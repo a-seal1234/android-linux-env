@@ -2,21 +2,23 @@ package com.alw.workstation.core.proot
 
 import android.util.Log
 import com.alw.workstation.core.proot.model.BindMount
+import com.alw.workstation.core.session.EnvironmentGenerator
 import com.alw.workstation.core.session.model.StackProfile
 import java.io.File
 
 /**
  * Execution harness for PRoot v5.4.0+ in unrooted Android user-space.
- * Incorporates selective storage bridge, cache redirection, and hardware node bindings.
+ * Incorporates rootfs directory isolation, hardware node bindings, selective storage bridge,
+ * build cache redirection, and transparent x86_64 translation hooks.
  */
 class ProotRunner(
     private val dirs: RuntimeDirectories,
-    private val prootBinaryPath: String
+    private val prootBinaryPath: String = dirs.prootLibPath
 ) {
     companion object {
         private const val TAG = "ALW::ProotRunner"
 
-        val systemPseudoMounts = listOf(
+        val defaultPseudoMounts = listOf(
             BindMount("/proc"),
             BindMount("/dev"),
             BindMount("/sys")
@@ -30,14 +32,23 @@ class ProotRunner(
         val workingDir: File
     )
 
-    fun buildLaunchCommand(profile: StackProfile, sessionRuntimeDir: File): LaunchCommand {
+    /**
+     * Builds a LaunchCommand targeting the profile's desktop compositor or custom session.
+     */
+    fun buildLaunchCommand(
+        profile: StackProfile,
+        sessionRuntimeDir: File,
+        customExecCommand: String? = null,
+        customArgs: List<String>? = null
+    ): LaunchCommand {
+        dirs.ensureDirectoriesExist()
         val rootfsDir = dirs.getRootfsDir(profile.distro.rootfsId)
         val args = mutableListOf<String>()
 
-        // 1. Fake root
+        // 1. Fake root user emulation (UID 0)
         args.add("-0")
 
-        // 2. Enable soft symlink emulation on non-POSIX storage if enabled
+        // 2. Enable soft symlink emulation on non-POSIX shared storage
         if (profile.storage.enableSymlink2File) {
             args.add("--link2symlink")
         }
@@ -47,12 +58,24 @@ class ProotRunner(
         args.add(rootfsDir.absolutePath)
 
         // 4. Base system pseudo mounts
-        for (mount in systemPseudoMounts) {
+        for (mount in defaultPseudoMounts) {
             args.add("-b")
             args.add(mount.toCliArg())
         }
 
-        // 5. Direct Adreno GPU KGSL device node
+        // Additional pseudo filesystems if present on host
+        val devPts = File("/dev/pts")
+        if (devPts.exists()) {
+            args.add("-b")
+            args.add("/dev/pts")
+        }
+        val devShm = File("/dev/shm")
+        if (devShm.exists()) {
+            args.add("-b")
+            args.add("/dev/shm")
+        }
+
+        // 5. Direct Adreno KGSL hardware GPU device node
         val kgslNode = File(profile.gpu.kgslNode)
         if (kgslNode.exists()) {
             args.add("-b")
@@ -61,7 +84,10 @@ class ProotRunner(
             Log.w(TAG, "KGSL device node does not exist on host: ${profile.gpu.kgslNode}")
         }
 
-        // 6. XDG runtime socket directory (wayland-0, audio socket)
+        // 6. XDG runtime socket directory (wayland-0, PipeWire audio socket)
+        if (!sessionRuntimeDir.exists()) {
+            sessionRuntimeDir.mkdirs()
+        }
         args.add("-b")
         args.add("${sessionRuntimeDir.absolutePath}:/tmp/runtime-alw")
 
@@ -80,14 +106,33 @@ class ProotRunner(
             if (sdcard.exists()) {
                 args.add("-b")
                 args.add("${sdcard.absolutePath}:${profile.storage.sdcardMountPoint}")
+
+                val emptyMaskDir = File(dirs.filesDir, "empty_mask")
+                if (!emptyMaskDir.exists()) {
+                    emptyMaskDir.mkdirs()
+                }
+
+                for (excludedPath in profile.storage.excludePaths) {
+                    val targetMount = if (excludedPath.startsWith("/storage/emulated/0")) {
+                        val subPath = excludedPath.removePrefix("/storage/emulated/0").trimStart('/')
+                        "${profile.storage.sdcardMountPoint}/$subPath"
+                    } else {
+                        excludedPath
+                    }
+                    args.add("-b")
+                    args.add("${emptyMaskDir.absolutePath}:$targetMount")
+                }
             }
         }
 
         // 9. Optional x86_64 emulation hook
         if (profile.emulation.enabled) {
-            val fexPath = File("/opt/fex/bin/FEXInterpreter")
+            val emulatorPath = when (profile.emulation.engine) {
+                StackProfile.EmulationEngine.FEX -> "/opt/fex/bin/FEXInterpreter"
+                StackProfile.EmulationEngine.BOX64 -> "/usr/bin/box64"
+            }
             args.add("-q")
-            args.add(fexPath.absolutePath)
+            args.add(emulatorPath)
         }
 
         // 10. Working directory
@@ -95,58 +140,41 @@ class ProotRunner(
         args.add("-w")
         args.add(userHome)
 
-        // 11. Environment variables
-        val env = mutableMapOf<String, String>()
-        env["TERM"] = "xterm-256color"
-        env["HOME"] = userHome
-        env["USER"] = profile.distro.defaultUser
-        env["PATH"] = "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin"
-        env["XDG_RUNTIME_DIR"] = "/tmp/runtime-alw"
-        env["WAYLAND_DISPLAY"] = "wayland-0"
+        // 11. Environment variables from EnvironmentGenerator
+        val env = EnvironmentGenerator.generateEnvironment(profile, sessionRuntimeDir)
 
-        // Build cache redirection to fast internal UFS storage
-        if (profile.storage.cacheRedirection.enabled) {
-            val baseCache = profile.storage.cacheRedirection.internalBaseDir
-            env["CARGO_TARGET_DIR"] = "$baseCache/cargo-target"
-            env["UV_PROJECT_ENVIRONMENT"] = "$baseCache/uv-env"
-            env["PNPM_STORE_DIR"] = "$baseCache/pnpm-store"
-            env["GOCACHE"] = "$baseCache/go-build"
-        }
-
-        // Driver-specific environment exports
-        when (profile.gpu.driverMode) {
-            StackProfile.DriverMode.TURNIP_KGSL -> {
-                env["VK_ICD_FILENAMES"] = "/opt/turnip/share/vulkan/icd.d/freedreno_icd.aarch64.json"
-                env["LIBGL_DRIVERS_PATH"] = "/opt/turnip/lib/dri"
-                env["LD_LIBRARY_PATH"] = "/opt/turnip/lib"
-                env["MESA_LOADER_DRIVER_OVERRIDE"] = "kgsl"
-            }
-            StackProfile.DriverMode.ADRENO_PROPRIETARY_ZINK -> {
-                env["VK_ICD_FILENAMES"] = "/opt/turnip/share/vulkan/icd.d/adreno_icd.aarch64.json"
-                env["MESA_LOADER_DRIVER_OVERRIDE"] = "zink"
-            }
-            StackProfile.DriverMode.LLVMPIPE -> {
-                env["MESA_LOADER_DRIVER_OVERRIDE"] = "llvmpipe"
-                env["LIBGL_ALWAYS_SOFTWARE"] = "1"
-            }
-            else -> {}
-        }
-
-        env.putAll(profile.gpu.environmentOverrides)
-
-        // Command to execute
         args.add("/usr/bin/env")
         args.add("-i")
         for ((k, v) in env) {
             args.add("$k=$v")
         }
-        args.add(profile.compositor.execCommand)
-        args.addAll(profile.compositor.extraArgs)
+
+        // 12. Command to execute
+        val execCmd = customExecCommand ?: profile.compositor.execCommand
+        val execArgs = customArgs ?: profile.compositor.extraArgs
+
+        args.add(execCmd)
+        args.addAll(execArgs)
+
+        // 13. Runner environment (host side for PRoot binary)
+        val runnerEnv = mutableMapOf<String, String>()
+        runnerEnv["PROOT_TMP_DIR"] = dirs.prootTmpDir.absolutePath
+        if (File(dirs.loaderPath).exists()) {
+            runnerEnv["PROOT_LOADER"] = dirs.loaderPath
+        }
+        if (File(dirs.nativeLibDir).exists()) {
+            runnerEnv["LD_LIBRARY_PATH"] = dirs.nativeLibDir
+        }
+
+        // 14. Resolve Android linker64 execution wrapper for PIE .so files
+        val useLinker = prootBinaryPath.endsWith(".so") && File("/system/bin/linker64").exists()
+        val binary = if (useLinker) "/system/bin/linker64" else prootBinaryPath
+        val finalArgs = if (useLinker) listOf(prootBinaryPath) + args else args
 
         return LaunchCommand(
-            binary = prootBinaryPath,
-            arguments = args,
-            environment = mapOf("PROOT_TMP_DIR" to dirs.prootTmpDir.absolutePath),
+            binary = binary,
+            arguments = finalArgs,
+            environment = runnerEnv,
             workingDir = rootfsDir
         )
     }
