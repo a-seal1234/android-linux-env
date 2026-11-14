@@ -45,12 +45,17 @@ Implement the native embedded Wayland surface server in `bridge:wayland`:
 ## 3. Dependencies & Gates
 
 - **Prerequisites:** TASK-005 (Done), TASK-006 (Done).
-- **Implementation Gate:** In Progress.
-- **Verification Gate:** Clean unit tests (`./gradlew test`) and clean build (`./gradlew assembleDebug`).
-- **Review Gate:** Self-review against Dev Framework v0.2 and SRS v0.1.
+- **Implementation Gate:** Complete.
+- **Verification Gate:** Complete (clean `./gradlew test` with 4 passing unit tests in `bridge:wayland`, 53 total project unit tests, and `./gradlew assembleDebug` passing with `libwayland_bridge.so` packaged).
+- **Review Gate:** Complete (self-review against Dev Framework v0.2 and SRS v0.1).
 
 ---
 
 ## 4. Actual Changes & Evidence
 
-*(To be recorded upon implementation completion)*
+- Implemented `WaylandSurfaceServer` in C++20 (`wayland_bridge.cpp`) binding UNIX domain socket at `$XDG_RUNTIME_DIR/wayland-0`, running a non-blocking `poll()` event loop, managing client connections, and registering core globals (`wl_compositor`, `wl_subcompositor`, `wl_shm`, `xdg_wm_base`, `zwp_tablet_manager_v2`, `wl_seat`, `wl_output`).
+- Implemented direct Android `ANativeWindow` presentation (`ANativeWindow_fromSurface`, buffer geometry configuration, buffer lock/unlock).
+- Registered `zwp_tablet_manager_v2` protocol interface strictly decoupled from touch and pointer channels.
+- Updated `WaylandServerManager` in Kotlin with comprehensive lifecycle management (`startServer`, `attachSurface`, `resizeSurface`, `detachSurface`, `stopServer`, `getStatus`) and JVM test harness mock state.
+- Created `WaylandServerManagerTest` with 4 passing unit tests.
+- Documented revision-bound verification evidence in [evidence/verification.md](evidence/verification.md).
