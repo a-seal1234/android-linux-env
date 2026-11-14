@@ -72,11 +72,13 @@ class ProotRunner(
             args.add("-b")
             args.add("/dev/pts")
         }
-        val devShm = File("/dev/shm")
-        if (devShm.exists()) {
-            args.add("-b")
-            args.add("/dev/shm")
+        // Isolated guest /dev/shm backed by app private tmpfs directory to avoid host permission errors
+        val shmDir = File(dirs.prootTmpDir, "shm")
+        if (!shmDir.exists()) {
+            shmDir.mkdirs()
         }
+        args.add("-b")
+        args.add("${shmDir.absolutePath}:/dev/shm")
 
         // 5. Direct Adreno KGSL hardware GPU device node & Fallback check
         val isKgslAccessible = kgslNodeChecker(profile.gpu.kgslNode)
