@@ -53,7 +53,7 @@ Implement the comprehensive desktop and creative input subsystem in `bridge:wayl
 
 ## 3. Dependencies & Gates
 
-- **Prerequisites:** TASK-007.
-- **Implementation Gate:** Pending completion of TASK-007.
-- **Verification Gate:** Pending.
-- **Review Gate:** Pending.
+- **Prerequisites:** TASK-007 (Completed).
+- **Implementation Gate:** Passed. Full tablet-v2, pointer capture, scancode remapping, and `StylusDataProvider` implemented.
+- **Verification Gate:** Passed. All unit tests (`StylusTiltMathTest`, `DefaultMotionEventStylusProviderTest`, `InputDispatcherTest`) and `./gradlew assembleDebug` passed.
+- **Review Gate:** Passed. Evidence recorded in [evidence/verification.md](evidence/verification.md).

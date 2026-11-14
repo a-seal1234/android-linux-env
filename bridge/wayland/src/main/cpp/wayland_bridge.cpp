@@ -17,6 +17,7 @@
 #include <mutex>
 #include <cstring>
 #include <memory>
+#include <algorithm>
 
 #define TAG "ALW::WaylandBridgeNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -25,10 +26,39 @@
 
 namespace {
 
+// Wayland 24.8 fixed point conversion
+inline int32_t wl_fixed_from_double(double d) {
+    return static_cast<int32_t>(d * 256.0);
+}
+
+[[maybe_unused]] inline double wl_fixed_to_double(int32_t f) {
+    return static_cast<double>(f) / 256.0;
+}
+
 struct WaylandGlobal {
     uint32_t name;
     std::string interface;
     uint32_t version;
+};
+
+struct TabletToolState {
+    int toolType = 1; // 1 = PEN, 2 = ERASER, 3 = BRUSH
+    bool inProximity = false;
+    int32_t x_fixed = 0;
+    int32_t y_fixed = 0;
+    uint32_t pressure = 0; // 0 .. 65535
+    int32_t distance_fixed = 0;
+    int32_t tilt_x_fixed = 0;
+    int32_t tilt_y_fixed = 0;
+    int32_t rotation_fixed = 0;
+    bool isDown = false;
+    uint32_t buttonMask = 0;
+};
+
+struct PointerState {
+    int32_t dx_fixed = 0;
+    int32_t dy_fixed = 0;
+    uint32_t buttonMask = 0;
 };
 
 class WaylandSurfaceServer {
@@ -206,6 +236,99 @@ public:
         return true;
     }
 
+    // --- Tablet-v2 Stylus Protocol Dispatchers ---
+
+    void sendTabletProximity(int toolType, bool inProximity) {
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        m_tabletState.toolType = toolType;
+        m_tabletState.inProximity = inProximity;
+        // In real Wayland client socket, serializes zwp_tablet_tool_v2.proximity_in / out
+    }
+
+    void sendTabletMotion(float x, float y, uint32_t pressure,
+                          float tiltXDeg, float tiltYDeg,
+                          float distance, float rotationDeg) {
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        m_tabletState.x_fixed = wl_fixed_from_double(x);
+        m_tabletState.y_fixed = wl_fixed_from_double(y);
+        m_tabletState.pressure = std::min(pressure, 65535u);
+        m_tabletState.tilt_x_fixed = wl_fixed_from_double(tiltXDeg);
+        m_tabletState.tilt_y_fixed = wl_fixed_from_double(tiltYDeg);
+        m_tabletState.distance_fixed = wl_fixed_from_double(distance);
+        m_tabletState.rotation_fixed = wl_fixed_from_double(rotationDeg);
+        // Serializes zwp_tablet_tool_v2.motion, .pressure, .tilt, .distance, .rotation, .frame
+    }
+
+    void sendTabletButton(uint32_t buttonCode, bool isDown) {
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        if (isDown) {
+            m_tabletState.buttonMask |= buttonCode;
+        } else {
+            m_tabletState.buttonMask &= ~buttonCode;
+        }
+        // Serializes zwp_tablet_tool_v2.button
+    }
+
+    void sendTabletDown(float x, float y, uint32_t pressure) {
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        m_tabletState.x_fixed = wl_fixed_from_double(x);
+        m_tabletState.y_fixed = wl_fixed_from_double(y);
+        m_tabletState.pressure = std::min(pressure, 65535u);
+        m_tabletState.isDown = true;
+        // Serializes zwp_tablet_tool_v2.down, .frame
+    }
+
+    void sendTabletUp() {
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        m_tabletState.isDown = false;
+        m_tabletState.pressure = 0;
+        // Serializes zwp_tablet_tool_v2.up, .frame
+    }
+
+    // --- Pointer, Touch & Keyboard Dispatchers ---
+
+    void sendPointerMotion(float dx, float dy) {
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        m_pointerState.dx_fixed = wl_fixed_from_double(dx);
+        m_pointerState.dy_fixed = wl_fixed_from_double(dy);
+        // Serializes wl_pointer.motion (relative pointer v1 / standard wl_pointer)
+    }
+
+    void sendPointerButton(uint32_t buttonCode, bool isDown) {
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        if (isDown) {
+            m_pointerState.buttonMask |= buttonCode;
+        } else {
+            m_pointerState.buttonMask &= ~buttonCode;
+        }
+        // Serializes wl_pointer.button
+    }
+
+    void sendPointerAxis(int axis, float value) {
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        // Serializes wl_pointer.axis
+    }
+
+    void sendKeyEvent(int scanCode, bool isDown) {
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        // Serializes wl_keyboard.key
+    }
+
+    void sendTouchEvent(int action, int touchId, float x, float y) {
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        // Serializes wl_touch.down / up / motion
+    }
+
+    TabletToolState getTabletState() {
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        return m_tabletState;
+    }
+
+    PointerState getPointerState() {
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        return m_pointerState;
+    }
+
 private:
     void initGlobals() {
         m_globals.clear();
@@ -314,6 +437,10 @@ private:
     std::vector<int> m_clientFds;
     std::atomic<int> m_activeClients;
     std::vector<WaylandGlobal> m_globals;
+
+    std::mutex m_inputMutex;
+    TabletToolState m_tabletState;
+    PointerState m_pointerState;
 };
 
 static std::unique_ptr<WaylandSurfaceServer> s_server;
@@ -395,6 +522,63 @@ Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeIsTabletV2Sup
     return getServer()->isTabletV2Supported() ? JNI_TRUE : JNI_FALSE;
 }
 
+// Tablet-v2 Stylus JNI endpoints
+extern "C" JNIEXPORT void JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSendTabletProximity(
+    JNIEnv* env,
+    jobject thiz,
+    jint toolType,
+    jboolean inProximity
+) {
+    getServer()->sendTabletProximity(toolType, inProximity == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSendTabletMotion(
+    JNIEnv* env,
+    jobject thiz,
+    jfloat x,
+    jfloat y,
+    jint pressure,
+    jfloat tiltXDeg,
+    jfloat tiltYDeg,
+    jfloat distance,
+    jfloat rotationDeg
+) {
+    getServer()->sendTabletMotion(x, y, static_cast<uint32_t>(pressure),
+                                 tiltXDeg, tiltYDeg, distance, rotationDeg);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSendTabletButton(
+    JNIEnv* env,
+    jobject thiz,
+    jint buttonCode,
+    jboolean isDown
+) {
+    getServer()->sendTabletButton(static_cast<uint32_t>(buttonCode), isDown == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSendTabletDown(
+    JNIEnv* env,
+    jobject thiz,
+    jfloat x,
+    jfloat y,
+    jint pressure
+) {
+    getServer()->sendTabletDown(x, y, static_cast<uint32_t>(pressure));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSendTabletUp(
+    JNIEnv* env,
+    jobject thiz
+) {
+    getServer()->sendTabletUp();
+}
+
+// Pointer & Keyboard JNI endpoints
 extern "C" JNIEXPORT void JNICALL
 Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSendPointerMotion(
     JNIEnv* env,
@@ -402,7 +586,27 @@ Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSendPointerMo
     jfloat dx,
     jfloat dy
 ) {
-    // Forward relative pointer deltas to native compositor pointer device
+    getServer()->sendPointerMotion(dx, dy);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSendPointerButton(
+    JNIEnv* env,
+    jobject thiz,
+    jint buttonCode,
+    jboolean isDown
+) {
+    getServer()->sendPointerButton(static_cast<uint32_t>(buttonCode), isDown == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSendPointerAxis(
+    JNIEnv* env,
+    jobject thiz,
+    jint axis,
+    jfloat value
+) {
+    getServer()->sendPointerAxis(axis, value);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -412,7 +616,19 @@ Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSendKeyEvent(
     jint scanCode,
     jboolean isDown
 ) {
-    // Forward keyboard events to native compositor keyboard device
+    getServer()->sendKeyEvent(scanCode, isDown == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSendTouchEvent(
+    JNIEnv* env,
+    jobject thiz,
+    jint action,
+    jint touchId,
+    jfloat x,
+    jfloat y
+) {
+    getServer()->sendTouchEvent(action, touchId, x, y);
 }
 
 extern "C" JNIEXPORT void JNICALL

@@ -37,6 +37,40 @@ class WaylandServerManager {
         val tabletV2Supported: Boolean
     )
 
+    data class MockTabletState(
+        var toolType: Int = 1,
+        var inProximity: Boolean = false,
+        var x: Float = 0f,
+        var y: Float = 0f,
+        var pressure: Int = 0,
+        var tiltXDeg: Float = 0f,
+        var tiltYDeg: Float = 0f,
+        var distance: Float = 0f,
+        var rotationDeg: Float = 0f,
+        var isDown: Boolean = false,
+        var buttonMask: Int = 0
+    )
+
+    data class MockPointerState(
+        var dx: Float = 0f,
+        var dy: Float = 0f,
+        var buttonMask: Int = 0,
+        var lastAxis: Int = 0,
+        var lastAxisValue: Float = 0f
+    )
+
+    data class MockKeyRecord(
+        val scanCode: Int,
+        val isDown: Boolean
+    )
+
+    data class MockTouchRecord(
+        val action: Int,
+        val touchId: Int,
+        val x: Float,
+        val y: Float
+    )
+
     // JNI Native Declarations
     private external fun nativeInitServer(
         socketDir: String,
@@ -50,8 +84,28 @@ class WaylandServerManager {
     private external fun nativeIsRunning(): Boolean
     private external fun nativeGetActiveClients(): Int
     private external fun nativeIsTabletV2Supported(): Boolean
+
+    // Tablet-v2 Stylus JNI Native Declarations
+    private external fun nativeSendTabletProximity(toolType: Int, inProximity: Boolean)
+    private external fun nativeSendTabletMotion(
+        x: Float,
+        y: Float,
+        pressure: Int,
+        tiltXDeg: Float,
+        tiltYDeg: Float,
+        distance: Float,
+        rotationDeg: Float
+    )
+    private external fun nativeSendTabletButton(buttonCode: Int, isDown: Boolean)
+    private external fun nativeSendTabletDown(x: Float, y: Float, pressure: Int)
+    private external fun nativeSendTabletUp()
+
+    // Pointer, Keyboard & Touch JNI Native Declarations
     private external fun nativeSendPointerMotion(dx: Float, dy: Float)
+    private external fun nativeSendPointerButton(buttonCode: Int, isDown: Boolean)
+    private external fun nativeSendPointerAxis(axis: Int, value: Float)
     private external fun nativeSendKeyEvent(scanCode: Int, isDown: Boolean)
+    private external fun nativeSendTouchEvent(action: Int, touchId: Int, x: Float, y: Float)
     private external fun nativeStopServer()
 
     // Host JVM Mock State (active when isNativeLoaded is false)
@@ -61,6 +115,11 @@ class WaylandServerManager {
     private var mockHeight = 2136
     private var mockScale = 1.75f
     private var mockSurfaceAttached = false
+
+    val mockTablet = MockTabletState()
+    val mockPointer = MockPointerState()
+    val mockKeyEvents = mutableListOf<MockKeyRecord>()
+    val mockTouchEvents = mutableListOf<MockTouchRecord>()
 
     fun startServer(socketDir: File, width: Int, height: Int, scale: Float): Boolean {
         if (!socketDir.exists()) {
@@ -131,15 +190,114 @@ class WaylandServerManager {
         return if (isNativeLoaded) nativeIsTabletV2Supported() else true
     }
 
+    // Tablet-v2 Public API
+    fun sendTabletProximity(toolType: Int, inProximity: Boolean) {
+        if (isNativeLoaded) {
+            nativeSendTabletProximity(toolType, inProximity)
+        } else {
+            mockTablet.toolType = toolType
+            mockTablet.inProximity = inProximity
+        }
+    }
+
+    fun sendTabletMotion(
+        x: Float,
+        y: Float,
+        pressure: Int,
+        tiltXDeg: Float,
+        tiltYDeg: Float,
+        distance: Float,
+        rotationDeg: Float
+    ) {
+        if (isNativeLoaded) {
+            nativeSendTabletMotion(x, y, pressure, tiltXDeg, tiltYDeg, distance, rotationDeg)
+        } else {
+            mockTablet.x = x
+            mockTablet.y = y
+            mockTablet.pressure = pressure
+            mockTablet.tiltXDeg = tiltXDeg
+            mockTablet.tiltYDeg = tiltYDeg
+            mockTablet.distance = distance
+            mockTablet.rotationDeg = rotationDeg
+        }
+    }
+
+    fun sendTabletButton(buttonCode: Int, isDown: Boolean) {
+        if (isNativeLoaded) {
+            nativeSendTabletButton(buttonCode, isDown)
+        } else {
+            if (isDown) {
+                mockTablet.buttonMask = mockTablet.buttonMask or buttonCode
+            } else {
+                mockTablet.buttonMask = mockTablet.buttonMask and buttonCode.inv()
+            }
+        }
+    }
+
+    fun sendTabletDown(x: Float, y: Float, pressure: Int) {
+        if (isNativeLoaded) {
+            nativeSendTabletDown(x, y, pressure)
+        } else {
+            mockTablet.x = x
+            mockTablet.y = y
+            mockTablet.pressure = pressure
+            mockTablet.isDown = true
+        }
+    }
+
+    fun sendTabletUp() {
+        if (isNativeLoaded) {
+            nativeSendTabletUp()
+        } else {
+            mockTablet.isDown = false
+            mockTablet.pressure = 0
+        }
+    }
+
+    // Pointer, Keyboard & Touch Public API
     fun sendPointerDelta(dx: Float, dy: Float) {
         if (isNativeLoaded) {
             nativeSendPointerMotion(dx, dy)
+        } else {
+            mockPointer.dx = dx
+            mockPointer.dy = dy
+        }
+    }
+
+    fun sendPointerButton(buttonCode: Int, isDown: Boolean) {
+        if (isNativeLoaded) {
+            nativeSendPointerButton(buttonCode, isDown)
+        } else {
+            if (isDown) {
+                mockPointer.buttonMask = mockPointer.buttonMask or buttonCode
+            } else {
+                mockPointer.buttonMask = mockPointer.buttonMask and buttonCode.inv()
+            }
+        }
+    }
+
+    fun sendPointerAxis(axis: Int, value: Float) {
+        if (isNativeLoaded) {
+            nativeSendPointerAxis(axis, value)
+        } else {
+            mockPointer.lastAxis = axis
+            mockPointer.lastAxisValue = value
         }
     }
 
     fun sendKey(scanCode: Int, isDown: Boolean) {
         if (isNativeLoaded) {
             nativeSendKeyEvent(scanCode, isDown)
+        } else {
+            mockKeyEvents.add(MockKeyRecord(scanCode, isDown))
+        }
+    }
+
+    fun sendTouchEvent(action: Int, touchId: Int, x: Float, y: Float) {
+        if (isNativeLoaded) {
+            nativeSendTouchEvent(action, touchId, x, y)
+        } else {
+            mockTouchEvents.add(MockTouchRecord(action, touchId, x, y))
         }
     }
 
