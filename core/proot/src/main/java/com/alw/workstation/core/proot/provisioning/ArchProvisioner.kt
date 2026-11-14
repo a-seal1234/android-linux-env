@@ -55,7 +55,7 @@ class ArchProvisioner(
             onProgress?.invoke(
                 ProvisioningProgress(
                     step = 0,
-                    totalSteps = 6,
+                    totalSteps = 7,
                     stepDescription = "Initialization",
                     lastLogLine = errorMsg,
                     isFailed = true,
@@ -91,7 +91,7 @@ class ArchProvisioner(
         )
 
         var currentStep = 0
-        var totalSteps = 6
+        var totalSteps = 7
         var currentDescription = "Starting provisioning"
 
         onProgress?.invoke(
