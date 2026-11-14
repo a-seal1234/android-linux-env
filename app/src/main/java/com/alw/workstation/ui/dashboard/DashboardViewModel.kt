@@ -7,6 +7,8 @@ import com.alw.workstation.core.proot.RootfsManager
 import com.alw.workstation.core.proot.RootfsManager.RootfsInfo
 import com.alw.workstation.core.proot.RuntimeDirectories
 import com.alw.workstation.core.proot.driver.TurnipDriverManager
+import com.alw.workstation.core.proot.shizuku.ShizukuCompanionManager
+import com.alw.workstation.core.proot.shizuku.ShizukuCompanionState
 import com.alw.workstation.core.session.CompositorOrchestrator
 import com.alw.workstation.core.session.ProfileRepository
 import com.alw.workstation.core.session.SessionController
@@ -36,6 +38,7 @@ class DashboardViewModel(
     val sessionController: SessionController = SessionController(profileRepository),
     private val orchestrator: CompositorOrchestrator? = null,
     val audioBridgeManager: AudioBridgeManager = AudioBridgeManager(),
+    val shizukuManager: ShizukuCompanionManager? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main
 ) {
@@ -45,6 +48,18 @@ class DashboardViewModel(
 
     init {
         refresh()
+        observeShizukuState()
+    }
+
+    private fun observeShizukuState() {
+        val manager = shizukuManager ?: return
+        CoroutineScope(ioDispatcher).launch {
+            manager.companionState.collect { companionState ->
+                withContext(mainDispatcher) {
+                    _uiState.update { it.copy(shizukuState = companionState) }
+                }
+            }
+        }
     }
 
     fun refresh() {
@@ -54,6 +69,7 @@ class DashboardViewModel(
         val activeDriver = driverManager.getActiveDriver()
         val sessionState = sessionController.sessionState.value
         val audioStatus = audioBridgeManager.getStatus()
+        val currentShizuku = shizukuManager?.companionState?.value ?: _uiState.value.shizukuState
 
         _uiState.update { current ->
             current.copy(
@@ -63,10 +79,12 @@ class DashboardViewModel(
                 activeDriver = activeDriver,
                 sessionState = sessionState,
                 audioStatus = audioStatus,
+                shizukuState = currentShizuku,
                 isLoading = false,
                 errorMessage = null
             )
         }
+        shizukuManager?.refreshState()
     }
 
     fun selectProfile(profile: StackProfile) {
@@ -246,5 +264,28 @@ class DashboardViewModel(
                 }
             }
         }
+    }
+
+    fun requestShizukuPermission() {
+        shizukuManager?.requestPermission()
+    }
+
+    fun applyPhantomProcessBypass(scope: CoroutineScope) {
+        val manager = shizukuManager ?: return
+        scope.launch(ioDispatcher) {
+            val success = manager.applyPhantomProcessBypass()
+            val msg = if (success) {
+                "Phantom Process limit lifted to 2.14B! HyperOS PowerKeeper whitelisted."
+            } else {
+                manager.companionState.value.lastError ?: "Failed applying Phantom Process bypass"
+            }
+            withContext(mainDispatcher) {
+                _uiState.update { it.copy(errorMessage = msg) }
+            }
+        }
+    }
+
+    fun refreshShizukuStatus() {
+        shizukuManager?.refreshState()
     }
 }

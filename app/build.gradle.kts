@@ -61,6 +61,9 @@ dependencies {
     implementation(project(":core:proot"))
     implementation(project(":bridge:wayland"))
 
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+
     val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
     implementation(composeBom)
     androidTestImplementation(composeBom)

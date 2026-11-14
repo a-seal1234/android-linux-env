@@ -38,6 +38,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.alw.workstation.core.proot.RootfsManager.RootfsInfo
+import com.alw.workstation.core.proot.shizuku.ShizukuCompanionState
+import com.alw.workstation.core.proot.shizuku.ShizukuState
 import com.alw.workstation.core.session.model.StackProfile
 import java.io.File
 
@@ -92,6 +94,16 @@ fun DashboardScreen(
                 onSwitchCompositor = { type -> viewModel.switchCompositor(type) },
                 onTriggerSafeMode = { viewModel.triggerSafeMode() },
                 onRegenerateDotfiles = { viewModel.regenerateDefaultDotfiles(scope) }
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // System & Optional Shizuku Companion Card (UID 2000)
+            SystemShizukuCard(
+                companionState = state.shizukuState,
+                onRequestPermission = { viewModel.requestShizukuPermission() },
+                onApplyBypass = { viewModel.applyPhantomProcessBypass(scope) },
+                onRefresh = { viewModel.refreshShizukuStatus() }
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -295,6 +307,118 @@ fun CompositorSwitcherCard(
                     }
                     OutlinedButton(onClick = onRegenerateDotfiles) {
                         Text("Restore Default Dotfiles")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SystemShizukuCard(
+    companionState: ShizukuCompanionState,
+    onRequestPermission: () -> Unit,
+    onApplyBypass: () -> Unit,
+    onRefresh: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "System Lifecycle & Shizuku Companion (UID 2000)",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        val (badgeText, badgeColor) = when (companionState.state) {
+                            ShizukuState.READY -> if (companionState.isBypassed) {
+                                "Unlimited (Shizuku Active)" to MaterialTheme.colorScheme.primary
+                            } else {
+                                "Shizuku Ready (Cap Active)" to MaterialTheme.colorScheme.tertiary
+                            }
+                            ShizukuState.PERMISSION_REQUIRED -> "Auth Required" to MaterialTheme.colorScheme.error
+                            ShizukuState.STOPPED -> "Shizuku Stopped" to MaterialTheme.colorScheme.outline
+                            ShizukuState.NOT_INSTALLED -> "Tier 1 Standard Sandbox" to MaterialTheme.colorScheme.outline
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = badgeColor.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = badgeText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = badgeColor,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    val statusDesc = when (companionState.state) {
+                        ShizukuState.READY -> if (companionState.isBypassed) {
+                            "Phantom Process limit lifted to 2,147,483,647. HyperOS PowerKeeper whitelisted for uninterrupted background compilation."
+                        } else {
+                            "Phantom Process limit: ${companionState.phantomProcessStatus.currentLimit}. Tap to lift the 32-process cap for multi-threaded compilation."
+                        }
+                        ShizukuState.PERMISSION_REQUIRED -> "Shizuku service is running. Tap Authorize to grant privileged ADB UID 2000 access."
+                        ShizukuState.STOPPED -> "Shizuku app is installed but service is not running. Tap Refresh after starting Shizuku via Wireless Debugging."
+                        ShizukuState.NOT_INSTALLED -> "Shizuku not installed. Workstation operates gracefully in Tier 1 Sandbox with Foreground Service & WakeLock."
+                    }
+
+                    Text(
+                        text = statusDesc,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    when (companionState.state) {
+                        ShizukuState.READY -> {
+                            if (!companionState.isBypassed) {
+                                Button(
+                                    onClick = onApplyBypass,
+                                    enabled = !companionState.isApplyingBypass
+                                ) {
+                                    Text(if (companionState.isApplyingBypass) "Applying..." else "Apply Phantom Bypass")
+                                }
+                            } else {
+                                OutlinedButton(onClick = onRefresh) {
+                                    Text("Re-check Limit")
+                                }
+                            }
+                        }
+                        ShizukuState.PERMISSION_REQUIRED -> {
+                            Button(onClick = onRequestPermission) {
+                                Text("Authorize Shizuku")
+                            }
+                        }
+                        ShizukuState.STOPPED -> {
+                            OutlinedButton(onClick = onRefresh) {
+                                Text("Check Shizuku")
+                            }
+                        }
+                        ShizukuState.NOT_INSTALLED -> {
+                            OutlinedButton(onClick = onRefresh) {
+                                Text("Refresh Status")
+                            }
+                        }
                     }
                 }
             }

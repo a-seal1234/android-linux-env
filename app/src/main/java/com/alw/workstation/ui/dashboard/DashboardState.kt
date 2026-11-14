@@ -4,6 +4,7 @@ import com.alw.workstation.bridge.wayland.audio.AudioStatus
 import com.alw.workstation.bridge.wayland.input.InputProfile
 import com.alw.workstation.core.proot.RootfsManager.RootfsInfo
 import com.alw.workstation.core.proot.driver.TurnipDriverManifest
+import com.alw.workstation.core.proot.shizuku.ShizukuCompanionState
 import com.alw.workstation.core.session.SessionState
 import com.alw.workstation.core.session.model.StackProfile
 
@@ -22,6 +23,7 @@ data class DashboardUiState(
         latencyMs = 0f
     ),
     val inputProfile: InputProfile = InputProfile.CREATIVE_PEN,
+    val shizukuState: ShizukuCompanionState = ShizukuCompanionState(),
     val showCreateDialog: Boolean = false,
     val showCloneDialog: Boolean = false,
     val showDeleteDialog: Boolean = false,

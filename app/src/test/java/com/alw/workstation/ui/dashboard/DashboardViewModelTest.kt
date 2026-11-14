@@ -149,4 +149,49 @@ class DashboardViewModelTest {
         viewModel.dismissDeleteDialog()
         assertFalse(viewModel.uiState.value.showDeleteDialog)
     }
+
+    @Test
+    fun testShizukuCompanionIntegration() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val testScope = TestScope(testDispatcher)
+
+        val mockRunner = object : com.alw.workstation.core.proot.shizuku.ShizukuShellRunner {
+            override fun execute(command: List<String>): com.alw.workstation.core.proot.shizuku.ShizukuCommandResult {
+                return if (command.contains("get")) {
+                    com.alw.workstation.core.proot.shizuku.ShizukuCommandResult(0, "2147483647", "")
+                } else {
+                    com.alw.workstation.core.proot.shizuku.ShizukuCommandResult(0, "Success", "")
+                }
+            }
+        }
+
+        val shizukuManager = com.alw.workstation.core.proot.shizuku.ShizukuCompanionManager(
+            shellRunner = mockRunner,
+            isInstalledProvider = { true },
+            isRunningProvider = { true },
+            hasPermissionProvider = { true },
+            ioDispatcher = testDispatcher
+        )
+
+        val vm = DashboardViewModel(
+            dirs = dirs,
+            rootfsManager = rootfsManager,
+            driverManager = driverManager,
+            profileRepository = profileRepository,
+            sessionController = sessionController,
+            shizukuManager = shizukuManager,
+            ioDispatcher = testDispatcher,
+            mainDispatcher = testDispatcher
+        )
+
+        testScope.advanceUntilIdle()
+
+        assertEquals(com.alw.workstation.core.proot.shizuku.ShizukuState.READY, vm.uiState.value.shizukuState.state)
+
+        vm.applyPhantomProcessBypass(testScope)
+        testScope.advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.shizukuState.isBypassed)
+        assertTrue(vm.uiState.value.shizukuState.phantomProcessStatus.currentLimit.contains("Unlimited"))
+    }
 }

@@ -25,6 +25,7 @@ import com.alw.workstation.core.proot.RuntimeDirectories
 import com.alw.workstation.core.proot.driver.GitHubReleaseFetcher
 import com.alw.workstation.core.proot.driver.TurnipDriverManager
 import com.alw.workstation.core.proot.provisioning.ArchProvisioner
+import com.alw.workstation.core.proot.shizuku.ShizukuCompanionManager
 import com.alw.workstation.core.session.CompositorOrchestrator
 import com.alw.workstation.core.session.ProfileRepository
 import com.alw.workstation.core.session.SessionController
@@ -66,6 +67,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var audioBridgeManager: AudioBridgeManager
     private lateinit var serverManager: WaylandServerManager
     private lateinit var inputDispatcher: InputDispatcher
+    private lateinit var shizukuCompanionManager: ShizukuCompanionManager
 
     private lateinit var wizardViewModel: WizardViewModel
     private lateinit var dashboardViewModel: DashboardViewModel
@@ -99,6 +101,10 @@ class MainActivity : ComponentActivity() {
         serverManager = WaylandServerManager()
         inputDispatcher = InputDispatcher(serverManager)
 
+        // Initialize optional Shizuku Companion (UID 2000)
+        shizukuCompanionManager = ShizukuCompanionManager(context = this)
+        shizukuCompanionManager.registerListeners()
+
         wizardViewModel = WizardViewModel(
             dirs = dirs,
             rootfsManager = rootfsManager,
@@ -117,7 +123,8 @@ class MainActivity : ComponentActivity() {
             profileRepository = profileRepository,
             sessionController = sessionController,
             orchestrator = orchestrator,
-            audioBridgeManager = audioBridgeManager
+            audioBridgeManager = audioBridgeManager,
+            shizukuManager = shizukuCompanionManager
         )
 
         stackConfiguratorViewModel = StackConfiguratorViewModel(
@@ -158,6 +165,11 @@ class MainActivity : ComponentActivity() {
     private fun stopWorkstationService() {
         val intent = Intent(this, WorkstationService::class.java)
         stopService(intent)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        shizukuCompanionManager.unregisterListeners()
     }
 }
 
