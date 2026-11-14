@@ -74,6 +74,59 @@ To counteract this:
    - **Layer A (Software scancode translation):** Remaps `KEYCODE_CAPS_LOCK` to `KEY_LEFTMETA` (`Super`) within the guest session via default `kb_options = caps:super`.
    - **Layer B (JNI Raw Key Interception):** Overrides `onKeyDown` / `onKeyUp` in the workstation `Activity`, consuming the raw hardware scancode before the HyperOS window manager intercepts it.
 
+### 3.3 Stylus & Graphics Tablet Architecture (`tablet-v2` Protocol)
+For creative workflows in desktop Linux applications such as **Krita**, **Blender** (Grease Pencil & Sculpting), **Inkscape**, and **GIMP**, routing stylus events through standard `wl_pointer` or `wl_touch` degrades the user experience by stripping pressure sensitivity, tilt, and button states, or causing unwanted touch panning/pinching.
+
+The `wayland-bridge` implements a dedicated Wayland `tablet-v2` protocol layer (`zwp_tablet_manager_v2`, `zwp_tablet_seat_v2`, `zwp_tablet_v2`, and `zwp_tablet_tool_v2`) strictly decoupled from touch and pointer dispatchers:
+
+```
++--------------------------------------------------------------------------+
+|                       Android Stylus Input Layer                         |
+|   MotionEvent (TOOL_TYPE_STYLUS / ERASER) OR Extensible Vendor Pen Hook  |
++-----------------------------------+--------------------------------------+
+                                    | JNI: dispatchStylusEvent()
+                                    v
++--------------------------------------------------------------------------+
+|           wayland-bridge Native Input Router (tablet-v2 Engine)          |
+|                                                                          |
+|   +-----------------------+  +-------------------+  +------------------+ |
+|   |  Coordinate & Range   |  | Planar Tilt Calc  |  | State Dispatcher | |
+|   |  x, y -> [0..surface] |  | tilt_x, tilt_y    |  | proximity, motion| |
+|   |  pressure -> [0..1.0] |  | (-90 to +90 deg)  |  | down, up, button | |
+|   +-----------------------+  +-------------------+  +------------------+ |
++-----------------------------------|--------------------------------------+
+                                    | Wayland zwp_tablet_tool_v2 events
+                                    v
++--------------------------------------------------------------------------+
+|                     Guest Linux Session (PRoot)                          |
+|         Wayland Compositor -> Native ARM64 Krita / Blender               |
++--------------------------------------------------------------------------+
+```
+
+1. **Protocol Implementation:**
+   - Exposes `zwp_tablet_manager_v2` global (version 1).
+   - Manages virtual tablet seat devices (`zwp_tablet_v2`) representing the integrated tablet digitizer.
+   - Dynamically binds pen tools (`zwp_tablet_tool_v2`) with types `PEN`, `ERASER`, and `BRUSH`.
+2. **Android `MotionEvent` Coordinate & Axis Mapping:**
+   - **Position:** `x`, `y` scaled to the virtual desktop surface.
+   - **Pressure:** Normalized from Android `event.getPressure()` to `[0.0, 1.0]` (emitted via `zwp_tablet_tool_v2.pressure` with range 65535).
+   - **Planar Tilt Calculation:** Wayland requires planar tilt angles ($tilt_x$, $tilt_y$) in degrees $[-90^\circ, +90^\circ]$. Android reports altitude tilt ($\theta = \text{AXIS\_TILT} \in [0, \pi/2]$) and azimuth orientation ($\phi = \text{AXIS\_ORIENTATION} \in [-\pi, \pi]$). The bridge mathematically projects these spherical angles:
+     $$\text{tilt}_x = \operatorname{degrees}\left(\arcsin\left(\sin(\text{AXIS\_TILT}) \cdot -\sin(\text{AXIS\_ORIENTATION})\right)\right)$$
+     $$\text{tilt}_y = \operatorname{degrees}\left(\arcsin\left(\sin(\text{AXIS\_TILT}) \cdot \cos(\text{AXIS\_ORIENTATION})\right)\right)$$
+   - **Hover & Proximity:** `ACTION_HOVER_MOVE` and `ACTION_HOVER_ENTER` dispatch `zwp_tablet_tool_v2.proximity_in` followed by `zwp_tablet_tool_v2.motion`. `ACTION_HOVER_EXIT` dispatches `zwp_tablet_tool_v2.proximity_out`.
+   - **Distance:** `MotionEvent.getAxisValue(AXIS_DISTANCE)` mapped to `zwp_tablet_tool_v2.distance` (range 65535).
+   - **Barrel Roll / Rotation:** `MotionEvent.getAxisValue(AXIS_GENERIC_1)` or device orientation mapped to `zwp_tablet_tool_v2.rotation` ($0^\circ$ to $360^\circ$).
+   - **Buttons:**
+     - Pen tip down/up: `zwp_tablet_tool_v2.down` / `up`.
+     - Stylus primary/barrel button (`BUTTON_STYLUS_PRIMARY`): mapped to `zwp_tablet_tool_v2.button(BTN_STYLUS, state)`.
+     - Stylus secondary button (`BUTTON_STYLUS_SECONDARY`): mapped to `zwp_tablet_tool_v2.button(BTN_STYLUS2, state)`.
+     - Eraser tool type (`TOOL_TYPE_ERASER`): activates `zwp_tablet_tool_v2` with `TYPE_ERASER`.
+3. **Extensible `StylusDataProvider` Interface:**
+   - Defined in Kotlin and JNI to allow raw high-precision pressure curves, sub-millimeter hover Z-distance, barrel roll IMU vectors, and hardware shortcut buttons from vendor Pen SDK hooks (e.g. Xiaomi Smart Pen 2 SDK or custom HID reader) to override or augment standard Android `MotionEvent` data without changing bridge core code.
+4. **Input Profile Switching & System Hover Icon Suppression:**
+   - **`CREATIVE_PEN` Profile:** Routes stylus events exclusively to `tablet-v2`, suppresses system mouse hover icons by applying `View.setPointerIcon(PointerIcon.getSystemIcon(context, PointerIcon.TYPE_NULL))` over the viewport, and enables 144Hz/240Hz pen sampling.
+   - **`GAMING_RAW` Profile:** Enforces relative hardware mouse capture, locks system cursor, and routes mouse deltas directly to `wl_pointer`.
+
 ---
 
 ## 4. Audio Routing via PipeWire / PulseAudio

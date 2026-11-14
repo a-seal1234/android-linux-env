@@ -40,32 +40,57 @@ Mesa's **Turnip** driver is an open-source Vulkan driver for Qualcomm Adreno har
 
 ---
 
-## 2. External Driver Library Management
+## 2. Shared External Driver Store Architecture
 
-Rather than installing Mesa into the guest rootfs (which risks pacman package conflicts during system updates), ALW manages driver versions as external packages outside the rootfs:
+Rather than installing Mesa into individual guest rootfs installations (which risks pacman conflicts during updates and duplicates large driver binaries across multi-rootfs instances), ALW implements a **Shared Driver Store** under internal storage:
+`files/drivers/turnip/<version>/`
+
+This single store is mounted read-only (`:ro`) across all rootfs instances, minimizing flash storage overhead and enabling instantaneous one-tap driver switching:
 
 ```
-/data/user/0/<package-id>/files/drivers/
-└── turnip-mesa-24.3-adreno825/
-    ├── manifest.json
-    ├── lib/
-    │   ├── libvulkan_freedreno.so
-    │   ├── libGLX_mesa.so
-    │   └── dri/
-    │       ├── zink_dri.so
-    │       └── kgsl_dri.so
-    └── share/
-        └── vulkan/
-            └── icd.d/
-                └── freedreno_icd.aarch64.json
+<app_internal_data>/files/drivers/
+├── turnip/
+│   ├── v24.3.0/
+│   │   ├── manifest.json
+│   │   ├── lib/
+│   │   │   ├── libvulkan_freedreno.so
+│   │   │   ├── libGLX_mesa.so
+│   │   │   └── dri/
+│   │   │       ├── zink_dri.so
+│   │   │       └── kgsl_dri.so
+│   │   └── share/
+│   │       └── vulkan/
+│   │           └── icd.d/
+│   │               └── freedreno_icd.aarch64.json
+│   └── v25.0.0-devel/
+└── adreno-proprietary/
+    └── v757-adreno825/
+        ├── libvulkan_adreno.so
+        └── share/vulkan/icd.d/adreno_icd.aarch64.json
 ```
+
+### 2.1 Remote Fetching & Cryptographic Verification
+1. **GitHub Releases Integration:**
+   - Fetches verified Turnip driver tarballs directly from upstream releases (e.g. `K11MCH1/Mesa-Turnip-Driver` or ALW official driver mirrors).
+   - Downloads accompanying `SHA256SUMS` or extracts declared checksums from release metadata.
+2. **SHA256 Verification:**
+   - Verifies archive integrity before unpacking into `files/drivers/turnip/<version>/`.
+   - Rejects corrupted or tampered driver tarballs.
+3. **Dynamic Runtime Binding:**
+   - Injects the active driver into the container via:
+     - `VK_ICD_FILENAMES=/opt/turnip/share/vulkan/icd.d/freedreno_icd.aarch64.json`
+     - `LIBGL_DRIVERS_PATH=/opt/turnip/lib/dri`
+     - `LD_LIBRARY_PATH=/opt/turnip/lib`
+     - `MESA_LOADER_DRIVER_OVERRIDE=kgsl` (or `zink` when paired with proprietary Vulkan)
 
 ### Driver Package Manifest (`manifest.json`)
 ```json
 {
-  "id": "turnip-mesa-24.3-adreno825",
+  "id": "turnip-v24.3.0",
   "name": "Mesa Turnip 24.3.0 (Adreno 8xx Optimized)",
   "version": "24.3.0",
+  "sourceUrl": "https://github.com/K11MCH1/Mesa-Turnip-Driver/releases/download/v24.3.0/turnip-v24.3.0.tar.gz",
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "minKernelVersion": "5.15.0",
   "supportedSoCs": ["Snapdragon 8 Gen 3", "Snapdragon 8s Gen 4"],
   "recommendedOverrides": {
