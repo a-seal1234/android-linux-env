@@ -45,6 +45,8 @@ object EnvironmentGenerator {
             env["UV_PROJECT_ENVIRONMENT"] = "$baseCache/uv-env"
             env["PNPM_STORE_DIR"] = "$baseCache/pnpm-store"
             env["GOCACHE"] = "$baseCache/go-build"
+            env["CCACHE_DIR"] = "$baseCache/ccache"
+            env["GRADLE_USER_HOME"] = "$baseCache/gradle-user-home"
         }
 
         // 5. GPU driver acceleration environment

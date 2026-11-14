@@ -13,7 +13,9 @@ import java.io.File
  */
 class ProotRunner(
     private val dirs: RuntimeDirectories,
-    private val prootBinaryPath: String = dirs.prootLibPath
+    private val prootBinaryPath: String = dirs.prootLibPath,
+    private val storageBridge: com.alw.workstation.core.proot.storage.StorageBridgeManager =
+        com.alw.workstation.core.proot.storage.StorageBridgeManager(dirs)
 ) {
     companion object {
         private const val TAG = "ALW::ProotRunner"
@@ -100,29 +102,11 @@ class ProotRunner(
             }
         }
 
-        // 8. Selective SDCard mount (excluding Android/data and Android/obb)
-        if (profile.storage.bindSdcard) {
-            val sdcard = File("/storage/emulated/0")
-            if (sdcard.exists()) {
-                args.add("-b")
-                args.add("${sdcard.absolutePath}:${profile.storage.sdcardMountPoint}")
-
-                val emptyMaskDir = File(dirs.filesDir, "empty_mask")
-                if (!emptyMaskDir.exists()) {
-                    emptyMaskDir.mkdirs()
-                }
-
-                for (excludedPath in profile.storage.excludePaths) {
-                    val targetMount = if (excludedPath.startsWith("/storage/emulated/0")) {
-                        val subPath = excludedPath.removePrefix("/storage/emulated/0").trimStart('/')
-                        "${profile.storage.sdcardMountPoint}/$subPath"
-                    } else {
-                        excludedPath
-                    }
-                    args.add("-b")
-                    args.add("${emptyMaskDir.absolutePath}:$targetMount")
-                }
-            }
+        // 8. Selective SDCard mount (with Scoped Storage Android/data & obb masking)
+        val storageMounts = storageBridge.resolveStorageMounts(profile)
+        for (mount in storageMounts) {
+            args.add("-b")
+            args.add(mount.toCliArg())
         }
 
         // 9. Optional x86_64 emulation hook
