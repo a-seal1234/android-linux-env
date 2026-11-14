@@ -21,7 +21,8 @@ class ArchProvisioningScriptBuilderTest {
         assertTrue(script.contains("pacman-key --init"))
         assertTrue(script.contains("pacman-key --populate archlinuxarm"))
 
-        // Step 2: System sync
+        // Step 2: System sync and package ignores
+        assertTrue(script.contains("IgnorePkg = linux-aarch64 linux-firmware mkinitcpio"))
         assertTrue(script.contains("pacman -Syu --noconfirm"))
 
         // Step 3: Core packages
@@ -68,6 +69,7 @@ class ArchProvisioningScriptBuilderTest {
     fun testSkippedOptions() {
         val config = ProvisioningConfig(
             configurePacmanKeys = false,
+            ignoreKernelPackages = false,
             updateSystem = false,
             installCorePackages = false,
             installAurWrapper = false,
@@ -77,6 +79,7 @@ class ArchProvisioningScriptBuilderTest {
         val script = ArchProvisioningScriptBuilder.buildScript(config)
 
         assertFalse(script.contains("pacman-key --init"))
+        assertFalse(script.contains("IgnorePkg = linux-aarch64"))
         assertFalse(script.contains("pacman -Syu"))
         assertFalse(script.contains("pacman -S --noconfirm --needed"))
         assertFalse(script.contains("makepkg --mflags"))

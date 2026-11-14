@@ -7,6 +7,7 @@ data class ProvisioningConfig(
     val defaultUser: String = "alw",
     val shell: String = "/bin/bash",
     val configurePacmanKeys: Boolean = true,
+    val ignoreKernelPackages: Boolean = true,
     val updateSystem: Boolean = true,
     val installCorePackages: Boolean = true,
     val additionalPackages: List<String> = emptyList(),
@@ -59,8 +60,20 @@ object ArchProvisioningScriptBuilder {
             }
             appendLine()
 
-            // Step 2: Sync and update
-            appendLine("echo '==> Step 2/$totalSteps: Synchronizing package repositories...'")
+            // Step 2: Configure pacman ignores, sync and update
+            appendLine("echo '==> Step 2/$totalSteps: Configuring package ignores and synchronizing repositories...'")
+            if (config.ignoreKernelPackages) {
+                appendLine("# Prevent kernel and initramfs hooks from executing inside PRoot")
+                appendLine("if [ -f /etc/pacman.conf ]; then")
+                appendLine("    if grep -q '^#IgnorePkg' /etc/pacman.conf; then")
+                appendLine("        sed -i 's/^#IgnorePkg.*$/IgnorePkg = linux-aarch64 linux-firmware mkinitcpio/' /etc/pacman.conf")
+                appendLine("    elif grep -q '^IgnorePkg' /etc/pacman.conf; then")
+                appendLine("        sed -i 's/^IgnorePkg.*$/IgnorePkg = linux-aarch64 linux-firmware mkinitcpio/' /etc/pacman.conf")
+                appendLine("    else")
+                appendLine("        sed -i '/\\[options\\]/a IgnorePkg = linux-aarch64 linux-firmware mkinitcpio' /etc/pacman.conf")
+                appendLine("    fi")
+                appendLine("fi")
+            }
             if (config.updateSystem) {
                 appendLine("pacman -Syu --noconfirm")
             } else {
