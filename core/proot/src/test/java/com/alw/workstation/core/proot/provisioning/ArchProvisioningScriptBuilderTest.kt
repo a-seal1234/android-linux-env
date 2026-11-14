@@ -51,6 +51,14 @@ class ArchProvisioningScriptBuilderTest {
         assertTrue(script.contains("/etc/chromium-flags.conf"))
         assertTrue(script.contains("--no-sandbox"))
         assertTrue(script.contains("--disable-gpu-sandbox"))
+
+        // Step 7: Low-latency PulseAudio / PipeWire audio bridge
+        assertTrue(script.contains("/etc/pulse/client.conf"))
+        assertTrue(script.contains("default-server = unix:/tmp/runtime-alw/pulse/native"))
+        assertTrue(script.contains("enable-shm = false"))
+        assertTrue(script.contains("ln -sfn /tmp/runtime-alw/pulse /run/user/1000/pulse"))
+        assertTrue(script.contains("PULSE_SERVER=unix:/run/user/1000/pulse/native unix:/tmp/runtime-alw/pulse/native"))
+        assertTrue(script.contains("PIPEWIRE_RUNTIME_DIR=/tmp/runtime-alw"))
     }
 
     @Test
@@ -74,7 +82,8 @@ class ArchProvisioningScriptBuilderTest {
             installCorePackages = false,
             installAurWrapper = false,
             configureWaylandFlags = false,
-            configureChromiumSandboxFlags = false
+            configureChromiumSandboxFlags = false,
+            configureAudioBridge = false
         )
         val script = ArchProvisioningScriptBuilder.buildScript(config)
 
@@ -85,5 +94,7 @@ class ArchProvisioningScriptBuilderTest {
         assertFalse(script.contains("makepkg --mflags"))
         assertFalse(script.contains("ELECTRON_OZONE_PLATFORM_HINT=wayland"))
         assertFalse(script.contains("/etc/chromium-flags.conf"))
+        assertFalse(script.contains("/etc/pulse/client.conf"))
+        assertFalse(script.contains("enable-shm = false"))
     }
 }

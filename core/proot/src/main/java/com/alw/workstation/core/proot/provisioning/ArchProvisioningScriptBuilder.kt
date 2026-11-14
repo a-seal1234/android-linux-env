@@ -13,7 +13,8 @@ data class ProvisioningConfig(
     val additionalPackages: List<String> = emptyList(),
     val installAurWrapper: Boolean = true,
     val configureWaylandFlags: Boolean = true,
-    val configureChromiumSandboxFlags: Boolean = true
+    val configureChromiumSandboxFlags: Boolean = true,
+    val configureAudioBridge: Boolean = true
 ) {
     companion object {
         val defaultCorePackages = listOf(
@@ -43,7 +44,7 @@ object ArchProvisioningScriptBuilder {
 
     fun buildScript(config: ProvisioningConfig): String {
         val allPackages = (ProvisioningConfig.defaultCorePackages + config.additionalPackages).distinct()
-        val totalSteps = 6
+        val totalSteps = 7
 
         return buildString {
             appendLine("#!/bin/bash")
@@ -134,6 +135,27 @@ object ArchProvisioningScriptBuilder {
                 appendLine("--no-sandbox")
                 appendLine("--disable-gpu-sandbox")
                 appendLine("EOF")
+            }
+            appendLine()
+
+            // Step 7: Low-latency PulseAudio and PipeWire client configuration
+            appendLine("echo '==> Step 7/$totalSteps: Configuring low-latency PulseAudio & PipeWire bridge...'")
+            if (config.configureAudioBridge) {
+                appendLine("mkdir -p /etc/pulse")
+                appendLine("cat <<'EOF' > /etc/pulse/client.conf")
+                appendLine("default-server = unix:/tmp/runtime-alw/pulse/native")
+                appendLine("autospawn = no")
+                appendLine("daemon-binary = /bin/true")
+                appendLine("enable-shm = false")
+                appendLine("EOF")
+                appendLine("mkdir -p /run/user/1000")
+                appendLine("ln -sfn /tmp/runtime-alw/pulse /run/user/1000/pulse")
+                appendLine("cat <<'EOF' >> /etc/environment")
+                appendLine("PULSE_SERVER=unix:/run/user/1000/pulse/native unix:/tmp/runtime-alw/pulse/native")
+                appendLine("PIPEWIRE_RUNTIME_DIR=/tmp/runtime-alw")
+                appendLine("EOF")
+            } else {
+                appendLine("echo 'Audio bridge configuration skipped by config'")
             }
             appendLine()
 

@@ -96,7 +96,11 @@ object EnvironmentGenerator {
             env["MESA_LOADER_DRIVER_OVERRIDE"] = it
         }
 
-        // 6. User and profile environment overrides
+        // 6. Low-Latency Audio Subsystem (PulseAudio & PipeWire)
+        env["PULSE_SERVER"] = "unix:/run/user/1000/pulse/native unix:/tmp/runtime-alw/pulse/native"
+        env["PIPEWIRE_RUNTIME_DIR"] = "/tmp/runtime-alw"
+
+        // 7. User and profile environment overrides
         env.putAll(profile.gpu.environmentOverrides)
 
         return env

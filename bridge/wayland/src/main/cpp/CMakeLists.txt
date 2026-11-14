@@ -5,6 +5,7 @@ add_library(
     wayland_bridge
     SHARED
     wayland_bridge.cpp
+    audio_bridge.cpp
 )
 
 find_library(
@@ -17,8 +18,14 @@ find_library(
     log
 )
 
+find_library(
+    aaudio-lib
+    aaudio
+)
+
 target_link_libraries(
     wayland_bridge
     ${android-lib}
     ${log-lib}
+    ${aaudio-lib}
 )

@@ -39,6 +39,11 @@ class EnvironmentGeneratorTest {
         assertEquals("zink", env["MESA_LOADER_DRIVER_OVERRIDE"])
         assertEquals("zink", env["GALLIUM_DRIVER"])
         assertEquals("noconform", env["TU_DEBUG"])
+
+        // Audio bridge variables
+        assertTrue(env["PULSE_SERVER"]!!.contains("/run/user/1000/pulse/native"))
+        assertTrue(env["PULSE_SERVER"]!!.contains("/tmp/runtime-alw/pulse/native"))
+        assertEquals("/tmp/runtime-alw", env["PIPEWIRE_RUNTIME_DIR"])
     }
 
     @Test

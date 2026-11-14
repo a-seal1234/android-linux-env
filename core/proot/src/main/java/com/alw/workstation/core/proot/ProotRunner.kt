@@ -89,12 +89,24 @@ class ProotRunner(
             Log.w(TAG, "KGSL device node ${profile.gpu.kgslNode} is not accessible on host. Cleanly falling back to LLVMPIPE software rasterizer.")
         }
 
-        // 6. XDG runtime socket directory (wayland-0, PipeWire audio socket)
+        // 6. XDG runtime socket directory (wayland-0, PipeWire/PulseAudio socket)
         if (!sessionRuntimeDir.exists()) {
             sessionRuntimeDir.mkdirs()
         }
+        val sessionPulseDir = File(sessionRuntimeDir, "pulse")
+        if (!sessionPulseDir.exists()) {
+            sessionPulseDir.mkdirs()
+        }
         args.add("-b")
         args.add("${sessionRuntimeDir.absolutePath}:/tmp/runtime-alw")
+
+        // Also bind-mount to /run/user/1000 for standard Linux client compatibility
+        val guestRunUser1000 = File(rootfsDir, "run/user/1000")
+        if (!guestRunUser1000.exists()) {
+            guestRunUser1000.mkdirs()
+        }
+        args.add("-b")
+        args.add("${sessionRuntimeDir.absolutePath}:/run/user/1000")
 
         // 7. External Mesa Turnip / Adreno driver package mount (shared driver store)
         if (profile.gpu.externalDriverId.isNotBlank() && profile.gpu.externalDriverId != "system-fallback") {
