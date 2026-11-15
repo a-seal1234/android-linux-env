@@ -175,6 +175,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (::inputDispatcher.isInitialized && sessionController.sessionState.value is SessionState.Running) {
+            if (inputDispatcher.handleKeyEvent(event)) {
+                return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     private fun setSessionRefreshRate(rateHz: Float) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
             val params = window.attributes

@@ -11,6 +11,17 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/file.h>
+#include <sys/syscall.h>
+
+#ifndef __NR_memfd_create
+#define __NR_memfd_create 279
+#endif
+#ifndef MFD_CLOEXEC
+#define MFD_CLOEXEC 0x0001U
+#endif
+#ifndef MFD_ALLOW_SEALING
+#define MFD_ALLOW_SEALING 0x0002U
+#endif
 
 #include <string>
 #include <vector>
@@ -240,6 +251,10 @@ struct WaylandClient {
     uint32_t decorationManagerId = 0;
     uint32_t dataDeviceManagerId = 0;
 
+    uint32_t activeSurfaceId = 0;
+    bool pointerEntered = false;
+    bool keyboardEntered = false;
+
     std::vector<uint8_t> recvBuffer;
     int pendingFd = -1;
 
@@ -256,6 +271,9 @@ struct WaylandClient {
     std::unordered_set<uint32_t> dataDevices;
 
     void cleanup() {
+        activeSurfaceId = 0;
+        pointerEntered = false;
+        keyboardEntered = false;
         shmPools.clear();
         buffers.clear();
         surfaces.clear();
@@ -293,6 +311,8 @@ struct TabletToolState {
 };
 
 struct PointerState {
+    float x = 0.0f;
+    float y = 0.0f;
     int32_t dx_fixed = 0;
     int32_t dy_fixed = 0;
     uint32_t buttonMask = 0;
@@ -600,28 +620,210 @@ public:
     }
 
     // --- Pointer & Keyboard Dispatchers ---
+    void dispatchPointerMotionInternal() {
+        uint32_t now = nowMillis();
+        int32_t x_fixed = wl_fixed_from_double(m_pointerState.x);
+        int32_t y_fixed = wl_fixed_from_double(m_pointerState.y);
+
+        for (auto& pair : m_clients) {
+            auto& client = pair.second;
+            if (client.pointerId > 0 && client.activeSurfaceId > 0) {
+                if (!client.pointerEntered) {
+                    WaylandMessageWriter enter(client.pointerId, 0); // enter
+                    enter.putUint32(nextSerial());
+                    enter.putUint32(client.activeSurfaceId);
+                    enter.putInt32(x_fixed);
+                    enter.putInt32(y_fixed);
+                    sendPacket(client.fd, enter);
+                    client.pointerEntered = true;
+                } else {
+                    WaylandMessageWriter motion(client.pointerId, 2); // motion
+                    motion.putUint32(now);
+                    motion.putInt32(x_fixed);
+                    motion.putInt32(y_fixed);
+                    sendPacket(client.fd, motion);
+                }
+                WaylandMessageWriter frame(client.pointerId, 5); // frame
+                sendPacket(client.fd, frame);
+            }
+        }
+    }
+
+    void sendPointerAbsolute(float x, float y) {
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
+
+        m_pointerState.x = std::clamp(x, 0.0f, static_cast<float>(m_width));
+        m_pointerState.y = std::clamp(y, 0.0f, static_cast<float>(m_height));
+        dispatchPointerMotionInternal();
+    }
+
     void sendPointerMotion(float dx, float dy) {
         std::lock_guard<std::mutex> lock(m_inputMutex);
-        m_pointerState.dx_fixed = wl_fixed_from_double(dx);
-        m_pointerState.dy_fixed = wl_fixed_from_double(dy);
+        std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
+
+        m_pointerState.x = std::clamp(m_pointerState.x + dx, 0.0f, static_cast<float>(m_width));
+        m_pointerState.y = std::clamp(m_pointerState.y + dy, 0.0f, static_cast<float>(m_height));
+        dispatchPointerMotionInternal();
     }
 
     void sendPointerButton(uint32_t buttonCode, bool isDown) {
         std::lock_guard<std::mutex> lock(m_inputMutex);
+        std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
+
+        // Map button code to Linux evdev
+        uint32_t linuxBtn = 272; // default BTN_LEFT
+        if (buttonCode == 1 || buttonCode == 272) linuxBtn = 272;      // BTN_LEFT
+        else if (buttonCode == 2 || buttonCode == 273) linuxBtn = 273; // BTN_RIGHT
+        else if (buttonCode == 4 || buttonCode == 274) linuxBtn = 274; // BTN_MIDDLE
+        else if (buttonCode == 8 || buttonCode == 275) linuxBtn = 275; // BTN_SIDE
+        else if (buttonCode == 16 || buttonCode == 276) linuxBtn = 276;// BTN_EXTRA
+        else linuxBtn = buttonCode;
+
         if (isDown) m_pointerState.buttonMask |= buttonCode;
         else m_pointerState.buttonMask &= ~buttonCode;
+
+        uint32_t now = nowMillis();
+        uint32_t btnSerial = nextSerial();
+
+        for (auto& pair : m_clients) {
+            auto& client = pair.second;
+            if (client.pointerId > 0 && client.activeSurfaceId > 0) {
+                if (!client.pointerEntered) {
+                    WaylandMessageWriter enter(client.pointerId, 0);
+                    enter.putUint32(nextSerial());
+                    enter.putUint32(client.activeSurfaceId);
+                    enter.putInt32(wl_fixed_from_double(m_pointerState.x));
+                    enter.putInt32(wl_fixed_from_double(m_pointerState.y));
+                    sendPacket(client.fd, enter);
+                    client.pointerEntered = true;
+                }
+                WaylandMessageWriter btn(client.pointerId, 3); // button
+                btn.putUint32(btnSerial);
+                btn.putUint32(now);
+                btn.putUint32(linuxBtn);
+                btn.putUint32(isDown ? 1 : 0);
+                sendPacket(client.fd, btn);
+
+                WaylandMessageWriter frame(client.pointerId, 5); // frame
+                sendPacket(client.fd, frame);
+            }
+        }
     }
 
     void sendPointerAxis(int axis, float value) {
         std::lock_guard<std::mutex> lock(m_inputMutex);
+        std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
+
+        uint32_t now = nowMillis();
+        int32_t fixedVal = wl_fixed_from_double(-value * 10.0);
+
+        for (auto& pair : m_clients) {
+            auto& client = pair.second;
+            if (client.pointerId > 0) {
+                WaylandMessageWriter ax(client.pointerId, 4); // axis
+                ax.putUint32(now);
+                ax.putUint32(static_cast<uint32_t>(axis));
+                ax.putInt32(fixedVal);
+                sendPacket(client.fd, ax);
+
+                WaylandMessageWriter frame(client.pointerId, 5); // frame
+                sendPacket(client.fd, frame);
+            }
+        }
     }
 
     void sendKeyEvent(int scanCode, bool isDown) {
         std::lock_guard<std::mutex> lock(m_inputMutex);
+        std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
+
+        uint32_t modBit = 0;
+        if (scanCode == 42 || scanCode == 54) modBit = (1 << 0);       // Shift
+        else if (scanCode == 58) modBit = (1 << 1);                    // CapsLock
+        else if (scanCode == 29 || scanCode == 97) modBit = (1 << 2);  // Ctrl
+        else if (scanCode == 56 || scanCode == 100) modBit = (1 << 3); // Alt
+        else if (scanCode == 125 || scanCode == 126) modBit = (1 << 6);// Super / Meta
+
+        if (modBit != 0) {
+            if (scanCode == 58) {
+                if (isDown) m_lockedModifiers ^= modBit;
+            } else {
+                if (isDown) m_depressedModifiers |= modBit;
+                else m_depressedModifiers &= ~modBit;
+            }
+        }
+
+        uint32_t now = nowMillis();
+        uint32_t keySerial = nextSerial();
+
+        for (auto& pair : m_clients) {
+            auto& client = pair.second;
+            if (client.keyboardId > 0) {
+                if (!client.keyboardEntered && client.activeSurfaceId > 0) {
+                    WaylandMessageWriter enter(client.keyboardId, 1);
+                    enter.putUint32(nextSerial());
+                    enter.putUint32(client.activeSurfaceId);
+                    enter.putUint32(0); // empty keys array length
+                    sendPacket(client.fd, enter);
+                    client.keyboardEntered = true;
+                }
+
+                WaylandMessageWriter keyMsg(client.keyboardId, 3); // key
+                keyMsg.putUint32(keySerial);
+                keyMsg.putUint32(now);
+                keyMsg.putUint32(static_cast<uint32_t>(scanCode));
+                keyMsg.putUint32(isDown ? 1 : 0);
+                sendPacket(client.fd, keyMsg);
+
+                WaylandMessageWriter modMsg(client.keyboardId, 4); // modifiers
+                modMsg.putUint32(nextSerial());
+                modMsg.putUint32(m_depressedModifiers);
+                modMsg.putUint32(0);
+                modMsg.putUint32(m_lockedModifiers);
+                modMsg.putUint32(0);
+                sendPacket(client.fd, modMsg);
+            }
+        }
     }
 
     void sendTouchEvent(int action, int touchId, float x, float y) {
         std::lock_guard<std::mutex> lock(m_inputMutex);
+        std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
+
+        uint32_t now = nowMillis();
+        int32_t x_fixed = wl_fixed_from_double(x);
+        int32_t y_fixed = wl_fixed_from_double(y);
+
+        for (auto& pair : m_clients) {
+            auto& client = pair.second;
+            if (client.touchId > 0 && client.activeSurfaceId > 0) {
+                if (action == 0) { // ACTION_DOWN
+                    WaylandMessageWriter down(client.touchId, 0);
+                    down.putUint32(nextSerial());
+                    down.putUint32(now);
+                    down.putUint32(client.activeSurfaceId);
+                    down.putInt32(touchId);
+                    down.putInt32(x_fixed);
+                    down.putInt32(y_fixed);
+                    sendPacket(client.fd, down);
+                } else if (action == 2) { // ACTION_MOVE
+                    WaylandMessageWriter motion(client.touchId, 2);
+                    motion.putUint32(now);
+                    motion.putInt32(touchId);
+                    motion.putInt32(x_fixed);
+                    motion.putInt32(y_fixed);
+                    sendPacket(client.fd, motion);
+                } else if (action == 1 || action == 3) { // ACTION_UP or CANCEL
+                    WaylandMessageWriter up(client.touchId, 1);
+                    up.putUint32(nextSerial());
+                    up.putUint32(now);
+                    up.putInt32(touchId);
+                    sendPacket(client.fd, up);
+                }
+                WaylandMessageWriter frame(client.touchId, 3);
+                sendPacket(client.fd, frame);
+            }
+        }
     }
 
 private:
@@ -680,6 +882,75 @@ private:
         if (clientFd >= 0 && !writer.data().empty()) {
             send(clientFd, writer.data().data(), writer.data().size(), MSG_NOSIGNAL);
         }
+    }
+
+    void sendPacketWithFd(int clientFd, const WaylandMessageWriter& writer, int fdToSend) {
+        if (clientFd < 0 || writer.data().empty()) return;
+        if (fdToSend < 0) {
+            sendPacket(clientFd, writer);
+            return;
+        }
+
+        struct msghdr msg;
+        std::memset(&msg, 0, sizeof(msg));
+        struct iovec iov;
+        iov.iov_base = const_cast<uint8_t*>(writer.data().data());
+        iov.iov_len = writer.data().size();
+        msg.msg_iov = &iov;
+        msg.msg_iovlen = 1;
+
+        char cmsgBuf[CMSG_SPACE(sizeof(int))];
+        std::memset(cmsgBuf, 0, sizeof(cmsgBuf));
+        msg.msg_control = cmsgBuf;
+        msg.msg_controllen = sizeof(cmsgBuf);
+
+        struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+        cmsg->cmsg_level = SOL_SOCKET;
+        cmsg->cmsg_type = SCM_RIGHTS;
+        cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+        *reinterpret_cast<int*>(CMSG_DATA(cmsg)) = fdToSend;
+
+        sendmsg(clientFd, &msg, MSG_NOSIGNAL);
+    }
+
+    int createXkbKeymapFd(uint32_t* outSize) {
+        const char* keymapStr =
+            "xkb_keymap {\n"
+            "    xkb_keycodes  { include \"xfree86+aliases(qwerty)\" };\n"
+            "    xkb_types     { include \"complete\" };\n"
+            "    xkb_compat    { include \"complete\" };\n"
+            "    xkb_symbols   { include \"pc+us+inet(evdev)\" };\n"
+            "    xkb_geometry  { include \"pc(pc105)\" };\n"
+            "};\n";
+        size_t len = strlen(keymapStr) + 1;
+        *outSize = static_cast<uint32_t>(len);
+
+        int fd = -1;
+#if defined(__NR_memfd_create)
+        fd = static_cast<int>(syscall(__NR_memfd_create, "alw_xkb_keymap", MFD_CLOEXEC | MFD_ALLOW_SEALING));
+#endif
+        if (fd < 0) {
+            std::string tempPath = m_socketDir.empty() ? "/tmp" : m_socketDir;
+            tempPath += "/.alw_keymap_XXXXXX";
+            std::vector<char> pathBuf(tempPath.begin(), tempPath.end());
+            pathBuf.push_back('\0');
+            fd = mkstemp(pathBuf.data());
+            if (fd >= 0) {
+                unlink(pathBuf.data());
+            }
+        }
+        if (fd >= 0) {
+            if (ftruncate(fd, len) == 0) {
+                void* ptr = mmap(nullptr, len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+                if (ptr != MAP_FAILED) {
+                    memcpy(ptr, keymapStr, len);
+                    munmap(ptr, len);
+                } else {
+                    pwrite(fd, keymapStr, len, 0);
+                }
+            }
+        }
+        return fd;
     }
 
     // Process a single Wayland message from a client
@@ -913,6 +1184,10 @@ private:
                     }
                 }
 
+                if (!surface.isCursor) {
+                    client.activeSurfaceId = objId;
+                }
+
                 // Send frame done to drive client presentation loop
                 uint32_t now = nowMillis();
                 for (uint32_t cb : surface.frameCallbacks) {
@@ -930,14 +1205,58 @@ private:
             if (opcode == 0) {
                 // wl_seat.get_pointer(new_id)
                 client.pointerId = reader.readUint32();
+                client.pointerEntered = false;
+                if (client.activeSurfaceId > 0) {
+                    WaylandMessageWriter enter(client.pointerId, 0);
+                    enter.putUint32(nextSerial());
+                    enter.putUint32(client.activeSurfaceId);
+                    enter.putInt32(wl_fixed_from_double(m_pointerState.x));
+                    enter.putInt32(wl_fixed_from_double(m_pointerState.y));
+                    sendPacket(client.fd, enter);
+
+                    WaylandMessageWriter frame(client.pointerId, 5);
+                    sendPacket(client.fd, frame);
+                    client.pointerEntered = true;
+                }
             } else if (opcode == 1) {
                 // wl_seat.get_keyboard(new_id)
                 client.keyboardId = reader.readUint32();
+                client.keyboardEntered = false;
+
+                // Send keymap(format = 1, fd, size): opcode 0
+                uint32_t keymapSize = 0;
+                int kmFd = createXkbKeymapFd(&keymapSize);
+                if (kmFd >= 0) {
+                    WaylandMessageWriter kmMsg(client.keyboardId, 0);
+                    kmMsg.putUint32(1); // WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1
+                    kmMsg.putUint32(keymapSize);
+                    sendPacketWithFd(client.fd, kmMsg, kmFd);
+                    close(kmFd);
+                }
+
                 // Send repeat_info(rate = 25, delay = 300): opcode 5
                 WaylandMessageWriter rpt(client.keyboardId, 5);
                 rpt.putInt32(25);
                 rpt.putInt32(300);
                 sendPacket(client.fd, rpt);
+
+                if (client.activeSurfaceId > 0) {
+                    WaylandMessageWriter enter(client.keyboardId, 1);
+                    enter.putUint32(nextSerial());
+                    enter.putUint32(client.activeSurfaceId);
+                    enter.putUint32(0); // empty keys array length
+                    sendPacket(client.fd, enter);
+
+                    WaylandMessageWriter mods(client.keyboardId, 4);
+                    mods.putUint32(nextSerial());
+                    mods.putUint32(m_depressedModifiers);
+                    mods.putUint32(0);
+                    mods.putUint32(m_lockedModifiers);
+                    mods.putUint32(0);
+                    sendPacket(client.fd, mods);
+
+                    client.keyboardEntered = true;
+                }
             } else if (opcode == 2) {
                 // wl_seat.get_touch(new_id)
                 client.touchId = reader.readUint32();
@@ -956,6 +1275,9 @@ private:
                 uint32_t cursorSurfId = reader.readUint32();
                 int32_t hx = reader.readInt32();
                 int32_t hy = reader.readInt32();
+                (void)serial;
+                (void)hx;
+                (void)hy;
                 if (cursorSurfId > 0) {
                     client.surfaces[cursorSurfId].isCursor = true;
                 }
@@ -984,6 +1306,7 @@ private:
                 xs.surfaceId = surfId;
                 client.xdgSurfaces[newId] = xs;
                 client.surfaces[surfId].isXdgSurface = true;
+                client.activeSurfaceId = surfId;
             } else if (opcode == 3) {
                 // xdg_wm_base.pong(serial)
             }
@@ -1014,6 +1337,7 @@ private:
                 tl.surfaceId = xs.surfaceId;
                 client.xdgToplevels[toplevelId] = tl;
                 xs.toplevelId = toplevelId;
+                client.activeSurfaceId = xs.surfaceId;
 
                 // Send xdg_toplevel.configure(width, height, states)
                 WaylandMessageWriter tlConfig(toplevelId, 0);
@@ -1312,6 +1636,8 @@ private:
     std::mutex m_inputMutex;
     TabletToolState m_tabletState;
     PointerState m_pointerState;
+    uint32_t m_depressedModifiers{0};
+    uint32_t m_lockedModifiers{0};
 };
 
 static std::unique_ptr<WaylandSurfaceServer> s_server;
@@ -1458,6 +1784,16 @@ Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSendPointerMo
     jfloat dy
 ) {
     getServer()->sendPointerMotion(dx, dy);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSendPointerAbsolute(
+    JNIEnv* env,
+    jobject thiz,
+    jfloat x,
+    jfloat y
+) {
+    getServer()->sendPointerAbsolute(x, y);
 }
 
 extern "C" JNIEXPORT void JNICALL

@@ -52,6 +52,8 @@ class WaylandServerManager {
     )
 
     data class MockPointerState(
+        var x: Float = 0f,
+        var y: Float = 0f,
         var dx: Float = 0f,
         var dy: Float = 0f,
         var buttonMask: Int = 0,
@@ -102,6 +104,7 @@ class WaylandServerManager {
 
     // Pointer, Keyboard & Touch JNI Native Declarations
     private external fun nativeSendPointerMotion(dx: Float, dy: Float)
+    private external fun nativeSendPointerAbsolute(x: Float, y: Float)
     private external fun nativeSendPointerButton(buttonCode: Int, isDown: Boolean)
     private external fun nativeSendPointerAxis(axis: Int, value: Float)
     private external fun nativeSendKeyEvent(scanCode: Int, isDown: Boolean)
@@ -255,6 +258,15 @@ class WaylandServerManager {
     }
 
     // Pointer, Keyboard & Touch Public API
+    fun sendPointerAbsolute(x: Float, y: Float) {
+        if (isNativeLoaded) {
+            nativeSendPointerAbsolute(x, y)
+        } else {
+            mockPointer.x = x
+            mockPointer.y = y
+        }
+    }
+
     fun sendPointerDelta(dx: Float, dy: Float) {
         if (isNativeLoaded) {
             nativeSendPointerMotion(dx, dy)

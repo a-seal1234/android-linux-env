@@ -115,6 +115,59 @@ class InputDispatcherTest {
     }
 
     @Test
+    fun testKeyboardKeyCodeFallbackWhenScanCodeZero() {
+        val mockEvent = mock(KeyEvent::class.java)
+        `when`(mockEvent.scanCode).thenReturn(0)
+        `when`(mockEvent.keyCode).thenReturn(KeyEvent.KEYCODE_ENTER)
+        `when`(mockEvent.action).thenReturn(KeyEvent.ACTION_DOWN)
+
+        val handled = dispatcher.handleKeyEvent(mockEvent)
+        assertTrue(handled)
+
+        assertEquals(1, serverManager.mockKeyEvents.size)
+        val keyRecord = serverManager.mockKeyEvents[0]
+        assertEquals(28, keyRecord.scanCode) // Linux KEY_ENTER = 28
+        assertTrue(keyRecord.isDown)
+    }
+
+    @Test
+    fun testMouseAbsoluteCoordinatesWhenRelativeDeltaZero() {
+        val mockEvent = mock(MotionEvent::class.java)
+        `when`(mockEvent.getToolType(0)).thenReturn(MotionEvent.TOOL_TYPE_MOUSE)
+        `when`(mockEvent.getAxisValue(MotionEvent.AXIS_RELATIVE_X)).thenReturn(0f)
+        `when`(mockEvent.getAxisValue(MotionEvent.AXIS_RELATIVE_Y)).thenReturn(0f)
+        `when`(mockEvent.x).thenReturn(450f)
+        `when`(mockEvent.y).thenReturn(650f)
+        `when`(mockEvent.buttonState).thenReturn(MotionEvent.BUTTON_PRIMARY)
+
+        val handled = dispatcher.handleMotionEvent(mockEvent, 1920, 1080)
+        assertTrue(handled)
+
+        assertEquals(450f, serverManager.mockPointer.x, 0.001f)
+        assertEquals(650f, serverManager.mockPointer.y, 0.001f)
+        assertEquals(MotionEvent.BUTTON_PRIMARY, serverManager.mockPointer.buttonMask)
+    }
+
+    @Test
+    fun testTouchSingleFingerDrivesPointerAbsoluteAndClick() {
+        val mockEvent = mock(MotionEvent::class.java)
+        `when`(mockEvent.getToolType(0)).thenReturn(MotionEvent.TOOL_TYPE_FINGER)
+        `when`(mockEvent.actionMasked).thenReturn(MotionEvent.ACTION_DOWN)
+        `when`(mockEvent.actionIndex).thenReturn(0)
+        `when`(mockEvent.pointerCount).thenReturn(1)
+        `when`(mockEvent.getPointerId(0)).thenReturn(1)
+        `when`(mockEvent.getX(0)).thenReturn(320f)
+        `when`(mockEvent.getY(0)).thenReturn(240f)
+
+        val handled = dispatcher.handleMotionEvent(mockEvent, 1920, 1080)
+        assertTrue(handled)
+
+        assertEquals(320f, serverManager.mockPointer.x, 0.001f)
+        assertEquals(240f, serverManager.mockPointer.y, 0.001f)
+        assertEquals(1, serverManager.mockPointer.buttonMask)
+    }
+
+    @Test
     fun testKeyboardCapsLockNotRemappedWhenDisabled() {
         dispatcher.rebindCapsToSuper = false
 

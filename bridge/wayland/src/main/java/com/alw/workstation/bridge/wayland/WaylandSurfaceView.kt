@@ -93,18 +93,22 @@ class WaylandSurfaceView @JvmOverloads constructor(
     }
 
     override fun onHoverEvent(event: MotionEvent): Boolean {
+        if (!hasFocus()) requestFocus()
         return inputDispatcher?.handleMotionEvent(event, width, height) ?: super.onHoverEvent(event)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!hasFocus()) requestFocus()
         return inputDispatcher?.handleMotionEvent(event, width, height) ?: super.onTouchEvent(event)
     }
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        if (!hasFocus()) requestFocus()
         return inputDispatcher?.handleMotionEvent(event, width, height) ?: super.onGenericMotionEvent(event)
     }
 
     override fun onCapturedPointerEvent(event: MotionEvent): Boolean {
+        if (!hasFocus()) requestFocus()
         return inputDispatcher?.handleMotionEvent(event, width, height) ?: super.onCapturedPointerEvent(event)
     }
 
