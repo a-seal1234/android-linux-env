@@ -61,8 +61,14 @@ object ArchProvisioningScriptBuilder {
             }
             appendLine()
 
-            // Step 2: Configure pacman ignores, sync and update
+            // Step 2: Configure pacman ignores, mirrors, sync and update
             appendLine("echo '==> Step 2/$totalSteps: Configuring package ignores and synchronizing repositories...'")
+            appendLine("# Ensure reliable high-speed Arch Linux ARM mirrors are prioritized")
+            appendLine("if [ -f /etc/pacman.d/mirrorlist ]; then")
+            appendLine("    if ! grep -q 'de4.mirror.archlinuxarm.org' /etc/pacman.d/mirrorlist; then")
+            appendLine("        printf 'Server = http://de4.mirror.archlinuxarm.org/\$arch/\$repo\\nServer = http://de3.mirror.archlinuxarm.org/\$arch/\$repo\\n' | cat - /etc/pacman.d/mirrorlist > /etc/pacman.d/mirrorlist.tmp && mv /etc/pacman.d/mirrorlist.tmp /etc/pacman.d/mirrorlist")
+            appendLine("    fi")
+            appendLine("fi")
             if (config.ignoreKernelPackages) {
                 appendLine("# Prevent kernel and initramfs hooks from executing inside PRoot")
                 appendLine("if [ -f /etc/pacman.conf ]; then")

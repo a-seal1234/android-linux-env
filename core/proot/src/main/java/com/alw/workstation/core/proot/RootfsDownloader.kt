@@ -29,11 +29,12 @@ class RootfsDownloader(
         private const val MIN_VALID_ROOTFS_SIZE = 50 * 1024 * 1024L // At least 50MB
 
         val DEFAULT_ARCH_AARCH64_MIRRORS = listOf(
+            "http://de4.mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz",
+            "http://de3.mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz",
             "http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz",
-            "http://mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz",
-            "http://fl.us.mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz",
             "http://dk.mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz",
-            "http://de3.mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
+            "http://mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz",
+            "http://fl.us.mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
         )
     }
 

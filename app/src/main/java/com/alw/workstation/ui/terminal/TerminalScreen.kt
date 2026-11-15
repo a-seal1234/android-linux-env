@@ -258,42 +258,69 @@ fun TerminalScreen(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = "Guest Rootfs Not Extracted",
+                                text = "Arch Linux ARM Not Extracted",
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 18.sp
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "No Linux binaries found in ${state.rootfsId}. Extract a rootfs archive or use Setup Wizard.",
+                                text = "No Linux binaries found in ${state.rootfsId}. Install official Arch Linux ARM (aarch64) or extract a local rootfs archive.",
                                 color = Color(0xFF8B949E),
                                 fontSize = 14.sp
                             )
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            val tmpArchive = File("/data/local/tmp/rootfs.tar.gz")
-                            if (tmpArchive.exists()) {
+                            val isBusy = state.isDownloadingRootfs || state.isExtractingRootfs
+
+                            Button(
+                                onClick = { viewModel.downloadAndInstallArchLinux() },
+                                enabled = !isBusy,
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB))
+                            ) {
+                                if (state.isDownloadingRootfs) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        color = Color.White,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(state.downloadProgress ?: "Downloading Arch Linux ARM...")
+                                } else if (state.isExtractingRootfs) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        color = Color.White,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(state.extractionProgress ?: "Extracting Arch Linux ARM...")
+                                } else {
+                                    Text("Download & Install Arch Linux ARM (aarch64)")
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            val localArchive = listOf(
+                                File("/data/local/tmp/ArchLinuxARM-aarch64-latest.tar.gz"),
+                                File("/data/local/tmp/rootfs.tar.gz")
+                            ).firstOrNull { it.exists() }
+
+                            if (localArchive != null) {
                                 Button(
-                                    onClick = { viewModel.extractArchive(tmpArchive) },
-                                    enabled = !state.isExtractingRootfs,
+                                    onClick = { viewModel.extractArchive(localArchive) },
+                                    enabled = !isBusy,
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636))
                                 ) {
-                                    if (state.isExtractingRootfs) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(16.dp),
-                                            color = Color.White,
-                                            strokeWidth = 2.dp
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(state.extractionProgress ?: "Extracting...")
-                                    } else {
-                                        Text("Extract /data/local/tmp/rootfs.tar.gz (${tmpArchive.length() / 1024 / 1024} MB)")
-                                    }
+                                    Text("Extract ${localArchive.name} (${localArchive.length() / 1024 / 1024} MB)")
                                 }
                                 Spacer(modifier = Modifier.height(8.dp))
                             }
 
-                            OutlinedButton(onClick = onOpenWizard) {
+                            OutlinedButton(
+                                onClick = onOpenWizard,
+                                enabled = !isBusy
+                            ) {
                                 Text("Open Setup Wizard")
                             }
                         }

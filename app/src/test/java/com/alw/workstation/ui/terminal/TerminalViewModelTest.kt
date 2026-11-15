@@ -127,4 +127,29 @@ class TerminalViewModelTest {
         viewModel.sendCtrlKey('C')
         assertFalse(viewModel.uiState.value.isCtrlActive)
     }
+
+    @Test
+    fun testDownloadAndInstallArchLinuxWithCachedFile() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val viewModel = TerminalViewModel(
+            dirs = dirs,
+            rootfsManager = rootfsManager,
+            rootfsExtractor = rootfsExtractor,
+            prootRunner = prootRunner,
+            profileRepository = profileRepository,
+            ioDispatcher = testDispatcher,
+            mainDispatcher = testDispatcher
+        )
+
+        // Mock cached archive file to bypass network
+        val downloadsDir = File(filesDir, "downloads").apply { mkdirs() }
+        val fakeArchive = File(downloadsDir, "ArchLinuxARM-aarch64-latest.tar.gz")
+        fakeArchive.writeBytes(ByteArray(60 * 1024 * 1024)) // > 50MB dummy
+
+        viewModel.downloadAndInstallArchLinux()
+        testScheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertFalse(state.isDownloadingRootfs)
+    }
 }

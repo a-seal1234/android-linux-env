@@ -9,6 +9,8 @@ data class TerminalState(
     val rootfsValid: Boolean = false,
     val outputText: String = "",
     val errorMessage: String? = null,
+    val isDownloadingRootfs: Boolean = false,
+    val downloadProgress: String? = null,
     val isExtractingRootfs: Boolean = false,
     val extractionProgress: String? = null,
     val cols: Int = 100,

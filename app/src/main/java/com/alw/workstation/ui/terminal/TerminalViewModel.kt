@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.alw.workstation.bridge.wayland.PtyBridge
 import com.alw.workstation.bridge.wayland.PtySession
 import com.alw.workstation.core.proot.ProotRunner
+import com.alw.workstation.core.proot.RootfsDownloader
 import com.alw.workstation.core.proot.RootfsExtractor
 import com.alw.workstation.core.proot.RootfsManager
 import com.alw.workstation.core.proot.RuntimeDirectories
@@ -26,6 +27,7 @@ class TerminalViewModel(
     private val rootfsExtractor: RootfsExtractor,
     private val prootRunner: ProotRunner,
     private val profileRepository: ProfileRepository,
+    private val rootfsDownloader: RootfsDownloader = RootfsDownloader(dirs),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main
 ) : ViewModel() {
@@ -210,6 +212,57 @@ class TerminalViewModel(
                 } else {
                     _uiState.update {
                         it.copy(errorMessage = "Extraction failed: ${result.errorMessage}")
+                    }
+                }
+            }
+        }
+    }
+
+    fun downloadAndInstallArchLinux() {
+        val rootfsId = _uiState.value.rootfsId
+        val rootfsDir = dirs.getRootfsDir(rootfsId)
+        if (!rootfsDir.exists()) rootfsDir.mkdirs()
+
+        _uiState.update {
+            it.copy(
+                isDownloadingRootfs = true,
+                downloadProgress = "Connecting to Arch Linux ARM mirrors...",
+                errorMessage = null
+            )
+        }
+
+        viewModelScope.launch(ioDispatcher) {
+            try {
+                val cached = rootfsDownloader.getCachedRootfsFile()
+                val archiveFile = if (cached.exists() && cached.length() > 50 * 1024 * 1024L) {
+                    cached
+                } else {
+                    rootfsDownloader.downloadRootfs(
+                        onProgress = { progress ->
+                            val speedMb = String.format("%.2f", progress.speedBytesPerSec / (1024.0 * 1024.0))
+                            val desc = "Downloading Arch Linux ARM: ${progress.percent}% ($speedMb MB/s)"
+                            _uiState.update { it.copy(downloadProgress = desc) }
+                        }
+                    )
+                }
+
+                withContext(mainDispatcher) {
+                    _uiState.update {
+                        it.copy(
+                            isDownloadingRootfs = false,
+                            downloadProgress = null
+                        )
+                    }
+                }
+
+                extractArchive(archiveFile)
+            } catch (e: Throwable) {
+                withContext(mainDispatcher) {
+                    _uiState.update {
+                        it.copy(
+                            isDownloadingRootfs = false,
+                            errorMessage = "Setup failed: ${e.message}"
+                        )
                     }
                 }
             }
