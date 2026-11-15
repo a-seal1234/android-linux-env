@@ -128,9 +128,48 @@ ID_LIKE=arch
 11-15 15:47:00.098 13751 13801 I ALW::PtyBridgeNative: forkpty spawned pid 15024 with masterFd 183
 ```
 
+### 3. Live End-to-End GUI Pixel Rendering on Xiaomi Pad 8:
+```
+11-15 17:59:19.555 23739 23825 I ALW::WaylandBridgeNative: Blitted frame #1: 1280x720 (stride=5120, fmt=1) -> ANativeWindow 3200x2136 (stride=3200)
+11-15 18:01:06.647 23739 23825 I ALW::WaylandBridgeNative: Blitted frame #541: 1280x720 (stride=5120, fmt=1) -> ANativeWindow 3200x2136 (stride=3200)
+11-15 18:04:10.387 23739 23825 I ALW::WaylandBridgeNative: Blitted frame #4261: 1280x720 (stride=5120, fmt=1) -> ANativeWindow 3200x2136 (stride=3200)
+```
+
+- **Screenshot Evidence:** `screen_gui_live_verified.png`
+- **Total Rendered GUI Window Pixels:** 543,135 non-black pixels
+- **GUI Window Coordinates:** Centered at `[1278, 647] -> [1922, 1489]` (Size: 644 x 842)
+- **Unique Colors in Compositor Surface:** 1,202 colors (white, window border grays, animating color gradients)
+- **Floating HUD Pill Coordinates:** `[2667, 160] -> [3155, 243]` (floating top-right)
+
 ---
 
-## 4. Conclusion & Next Phase Readiness
+## 4. Root Cause Analysis & Visual Rendering Pipeline Fixes
+
+During physical device testing, five critical bottlenecks in the end-to-end Wayland display pipeline were identified and resolved:
+
+1. **`wl_shm_pool` Early Protocol Destruction vs. Memory Lifetime:**
+   - *Problem:* `wlroots` and client applications routinely invoke `wl_shm_pool.destroy` immediately after creating buffers. The previous bridge code invoked `munmap()` and erased the pool upon receiving `wl_shm_pool.destroy`, invalidating buffer memory mappings before `wl_surface.commit`.
+   - *Fix:* Refactored `ShmPool` to use reference-counted RAII via `std::shared_ptr<ShmPoolStorage>`. Each `ShmBuffer` holds a shared reference, ensuring memory remains mapped until all associated buffers are released.
+
+2. **`wl_buffer.release` Event Missing:**
+   - *Problem:* Clients employing double/triple-buffering stalled or endlessly allocated new shared memory pools because the compositor never notified them that buffers were released.
+   - *Fix:* Added `wl_buffer.release` (opcode 0) event dispatching immediately following `ANativeWindow_unlockAndPost()`.
+
+3. **Cursor Surface Differentiation from Desktop Windows:**
+   - *Problem:* Pointer cursor buffers (e.g. 10x16) committing to the Wayland bridge were blitted and scaled to fill the entire 3200x2136 screen, overwriting the desktop window with transparent/black cursor pixels.
+   - *Fix:* Introduced surface classification (`isCursor` vs. `isXdgSurface`). Restricted fullscreen blits to `xdg_surface` instances or surfaces with dimensions $\ge 320 \times 240$.
+
+4. **Jetpack Compose Window Occlusion of `SurfaceView`:**
+   - *Problem:* In Compose, `Box(modifier = Modifier.fillMaxSize().background(Color.Black))` and root `Surface` drew an opaque background directly over the window layer at Z = 0, completely hiding the underlying `SurfaceView` positioned at Z = -2.
+   - *Fix:* Configured `window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))`, removed the opaque Box background in `SessionSurfaceScreen`, and set `WaylandSurfaceView` to `setZOrderOnTop(true)`.
+
+5. **Overlay Controls via Compose `Popup`:**
+   - *Problem:* Positioning `SurfaceView` at Z = 1 would occlude standard Compose views in the same window.
+   - *Fix:* Wrapped `FloatingControlPill` in Compose `Popup(properties = PopupProperties(focusable = false))`, creating a native sub-window above the SurfaceView while directing hardware keyboard and stylus input into `WaylandSurfaceView`.
+
+---
+
+## 5. Conclusion & Next Phase Readiness
 
 The Xiaomi Pad 8 hardware smoke test confirms that all native engines, PRoot sandboxing, Wayland frame blitter, AAudio low-latency audio sink, Turnip driver store, and Compose UI interfaces function smoothly on the physical Snapdragon 8s Gen 4 / Adreno 825 tablet under Android 16.
 

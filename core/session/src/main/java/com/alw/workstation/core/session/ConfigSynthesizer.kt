@@ -158,7 +158,7 @@ object ConfigSynthesizer {
             appendLine("    <windowRule identifier=\"*\" serverDecoration=\"yes\" />")
             appendLine("  </windowRules>")
             appendLine("  <keyboard>")
-            appendLine("    <keybind key=\"W-Return\"><action name=\"Execute\" command=\"kitty\" /></keybind>")
+            appendLine("    <keybind key=\"W-Return\"><action name=\"Execute\" command=\"weston-terminal\" /></keybind>")
             appendLine("    <keybind key=\"W-q\"><action name=\"Close\" /></keybind>")
             appendLine("    <keybind key=\"W-m\"><action name=\"Exit\" /></keybind>")
             appendLine("  </keyboard>")
@@ -178,7 +178,7 @@ object ConfigSynthesizer {
             appendLine("# LabWC Safe Mode autostart")
             appendLine("pipewire &")
             appendLine("wireplumber &")
-            appendLine("kitty &")
+            appendLine("weston-terminal &")
         }
     }
 

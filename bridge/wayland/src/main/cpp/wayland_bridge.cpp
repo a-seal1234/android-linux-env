@@ -10,10 +10,12 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/file.h>
 
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <thread>
 #include <atomic>
 #include <mutex>
@@ -43,8 +45,8 @@ public:
     WaylandMessageWriter(uint32_t objectId, uint16_t opcode) {
         m_buf.resize(8);
         *reinterpret_cast<uint32_t*>(&m_buf[0]) = objectId;
-        *reinterpret_cast<uint16_t*>(&m_buf[4]) = 8;
-        *reinterpret_cast<uint16_t*>(&m_buf[6]) = opcode;
+        *reinterpret_cast<uint16_t*>(&m_buf[4]) = opcode;
+        *reinterpret_cast<uint16_t*>(&m_buf[6]) = 8;
     }
 
     void putUint32(uint32_t val) {
@@ -75,11 +77,22 @@ public:
         updateSize();
     }
 
+    void putArray(const void* data, size_t size) {
+        putUint32(static_cast<uint32_t>(size));
+        if (size > 0 && data != nullptr) {
+            size_t padded = (size + 3) & ~3;
+            size_t offset = m_buf.size();
+            m_buf.resize(offset + padded, 0);
+            std::memcpy(&m_buf[offset], data, size);
+            updateSize();
+        }
+    }
+
     const std::vector<uint8_t>& data() const { return m_buf; }
 
 private:
     void updateSize() {
-        *reinterpret_cast<uint16_t*>(&m_buf[4]) = static_cast<uint16_t>(m_buf.size());
+        *reinterpret_cast<uint16_t*>(&m_buf[6]) = static_cast<uint16_t>(m_buf.size());
     }
     std::vector<uint8_t> m_buf;
 };
@@ -133,13 +146,12 @@ struct WaylandGlobal {
     uint32_t version;
 };
 
-struct ShmPool {
-    uint32_t poolId;
+struct ShmPoolStorage {
     int fd = -1;
     int32_t size = 0;
     uint8_t* mappedData = nullptr;
 
-    void cleanup() {
+    ~ShmPoolStorage() {
         if (mappedData != nullptr && size > 0) {
             munmap(mappedData, size);
             mappedData = nullptr;
@@ -151,20 +163,65 @@ struct ShmPool {
     }
 };
 
+struct ShmPool {
+    uint32_t poolId = 0;
+    std::shared_ptr<ShmPoolStorage> storage;
+};
+
 struct ShmBuffer {
-    uint32_t bufferId;
-    uint32_t poolId;
-    int32_t offset;
-    int32_t width;
-    int32_t height;
-    int32_t stride;
-    uint32_t format;
+    uint32_t bufferId = 0;
+    std::shared_ptr<ShmPoolStorage> storage;
+    int32_t offset = 0;
+    int32_t width = 0;
+    int32_t height = 0;
+    int32_t stride = 0;
+    uint32_t format = 0;
 };
 
 struct ClientSurface {
     uint32_t surfaceId;
     uint32_t attachedBufferId = 0;
     std::vector<uint32_t> frameCallbacks;
+    bool isCursor = false;
+    bool isXdgSurface = false;
+};
+
+struct XdgPositioner {
+    uint32_t id = 0;
+};
+
+struct XdgToplevel {
+    uint32_t id = 0;
+    uint32_t surfaceId = 0;
+    std::string title;
+    std::string appId;
+    bool configured = false;
+};
+
+struct XdgPopup {
+    uint32_t id = 0;
+    uint32_t surfaceId = 0;
+};
+
+struct XdgSurface {
+    uint32_t id = 0;
+    uint32_t surfaceId = 0;
+    uint32_t toplevelId = 0;
+    uint32_t popupId = 0;
+    bool configured = false;
+    uint32_t lastConfigureSerial = 0;
+};
+
+struct Subsurface {
+    uint32_t id = 0;
+    uint32_t surfaceId = 0;
+    uint32_t parentId = 0;
+};
+
+struct ToplevelDecoration {
+    uint32_t id = 0;
+    uint32_t toplevelId = 0;
+    uint32_t mode = 1; // 1 = client-side
 };
 
 struct WaylandClient {
@@ -174,10 +231,14 @@ struct WaylandClient {
     uint32_t seatId = 0;
     uint32_t outputId = 0;
     uint32_t compositorId = 0;
+    uint32_t subcompositorId = 0;
+    uint32_t xdgWmBaseId = 0;
     uint32_t pointerId = 0;
     uint32_t keyboardId = 0;
     uint32_t touchId = 0;
     uint32_t tabletManagerId = 0;
+    uint32_t decorationManagerId = 0;
+    uint32_t dataDeviceManagerId = 0;
 
     std::vector<uint8_t> recvBuffer;
     int pendingFd = -1;
@@ -185,14 +246,27 @@ struct WaylandClient {
     std::unordered_map<uint32_t, ShmPool> shmPools;
     std::unordered_map<uint32_t, ShmBuffer> buffers;
     std::unordered_map<uint32_t, ClientSurface> surfaces;
+    std::unordered_map<uint32_t, XdgPositioner> xdgPositioners;
+    std::unordered_map<uint32_t, XdgSurface> xdgSurfaces;
+    std::unordered_map<uint32_t, XdgToplevel> xdgToplevels;
+    std::unordered_map<uint32_t, XdgPopup> xdgPopups;
+    std::unordered_map<uint32_t, Subsurface> subsurfaces;
+    std::unordered_map<uint32_t, ToplevelDecoration> decorations;
+    std::unordered_set<uint32_t> dataSources;
+    std::unordered_set<uint32_t> dataDevices;
 
     void cleanup() {
-        for (auto& pair : shmPools) {
-            pair.second.cleanup();
-        }
         shmPools.clear();
         buffers.clear();
         surfaces.clear();
+        xdgPositioners.clear();
+        xdgSurfaces.clear();
+        xdgToplevels.clear();
+        xdgPopups.clear();
+        subsurfaces.clear();
+        decorations.clear();
+        dataSources.clear();
+        dataDevices.clear();
         if (pendingFd >= 0) {
             close(pendingFd);
             pendingFd = -1;
@@ -243,7 +317,7 @@ public:
     }
 
     bool start(const std::string& socketDir, int width, int height, float scale) {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
         if (m_running.load()) {
             LOGW("Wayland server already running");
             return true;
@@ -254,6 +328,14 @@ public:
         m_height = height > 0 ? height : 2136;
         m_scale = scale > 0.1f ? scale : 1.75f;
         m_socketPath = socketDir + "/wayland-0";
+        m_lockPath = m_socketPath + ".lock";
+
+        m_lockFd = open(m_lockPath.c_str(), O_CREAT | O_CLOEXEC | O_RDWR, 0660);
+        if (m_lockFd >= 0) {
+            if (flock(m_lockFd, LOCK_EX | LOCK_NB) < 0) {
+                LOGW("Could not acquire exclusive flock on %s: %s", m_lockPath.c_str(), strerror(errno));
+            }
+        }
 
         unlink(m_socketPath.c_str());
 
@@ -307,12 +389,22 @@ public:
             m_serverThread.join();
         }
 
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
         for (auto& pair : m_clients) {
             pair.second.cleanup();
         }
         m_clients.clear();
         m_activeClients.store(0);
+
+        if (m_lockFd >= 0) {
+            flock(m_lockFd, LOCK_UN);
+            close(m_lockFd);
+            m_lockFd = -1;
+        }
+        if (!m_lockPath.empty()) {
+            unlink(m_lockPath.c_str());
+            m_lockPath.clear();
+        }
 
         if (!m_socketPath.empty()) {
             unlink(m_socketPath.c_str());
@@ -328,7 +420,7 @@ public:
     }
 
     void setNativeWindow(ANativeWindow* window) {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
         if (m_nativeWindow != nullptr) {
             ANativeWindow_release(m_nativeWindow);
             m_nativeWindow = nullptr;
@@ -345,7 +437,7 @@ public:
     }
 
     void resizeSurface(int width, int height) {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
         m_width = width;
         m_height = height;
         if (m_nativeWindow != nullptr) {
@@ -364,9 +456,9 @@ public:
         return false;
     }
 
-    // Direct pixel blit to ANativeWindow buffer
-    void blitBufferToWindow(const uint8_t* src, int srcWidth, int srcHeight, int srcStride) {
-        std::lock_guard<std::mutex> lock(m_mutex);
+    // Direct pixel blit to ANativeWindow buffer with format-aware color channel mapping & aspect scaling
+    void blitBufferToWindow(const uint8_t* src, int srcWidth, int srcHeight, int srcStride, uint32_t format = 0) {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
         if (m_nativeWindow == nullptr || src == nullptr) return;
 
         ANativeWindow_Buffer outBuffer;
@@ -375,15 +467,66 @@ public:
             return;
         }
 
-        const int copyWidth = std::min(srcWidth, outBuffer.width);
-        const int copyHeight = std::min(srcHeight, outBuffer.height);
-        const size_t rowBytes = static_cast<size_t>(copyWidth) * 4;
+        static int s_frameLogCount = 0;
+        if (++s_frameLogCount % 60 == 1) {
+            LOGI("Blitted frame #%d: %dx%d (stride=%d, fmt=%u) -> ANativeWindow %dx%d (stride=%d)",
+                 s_frameLogCount, srcWidth, srcHeight, srcStride, format, outBuffer.width, outBuffer.height, outBuffer.stride);
+        }
 
         auto* dstPixels = reinterpret_cast<uint8_t*>(outBuffer.bits);
-        for (int y = 0; y < copyHeight; ++y) {
-            const uint8_t* srcRow = src + y * srcStride;
-            uint8_t* dstRow = dstPixels + y * outBuffer.stride * 4;
-            std::memcpy(dstRow, srcRow, rowBytes);
+        if (srcWidth == outBuffer.width && srcHeight == outBuffer.height) {
+            for (int y = 0; y < outBuffer.height; ++y) {
+                const uint32_t* srcRow = reinterpret_cast<const uint32_t*>(src + y * srcStride);
+                uint32_t* dstRow = reinterpret_cast<uint32_t*>(dstPixels + y * outBuffer.stride * 4);
+
+                if (format == 0) {
+                    // WL_SHM_FORMAT_ARGB8888 -> Android RGBA_8888: swap byte 0 (B) and byte 2 (R)
+                    for (int x = 0; x < outBuffer.width; ++x) {
+                        uint32_t p = srcRow[x];
+                        dstRow[x] = ((p & 0x00FF0000) >> 16) |
+                                    (p & 0x0000FF00)         |
+                                    ((p & 0x000000FF) << 16) |
+                                    (p & 0xFF000000);
+                    }
+                } else if (format == 1) {
+                    // WL_SHM_FORMAT_XRGB8888 -> Android RGBA_8888: swap B/R and force Alpha=0xFF
+                    for (int x = 0; x < outBuffer.width; ++x) {
+                        uint32_t p = srcRow[x];
+                        dstRow[x] = ((p & 0x00FF0000) >> 16) |
+                                    (p & 0x0000FF00)         |
+                                    ((p & 0x000000FF) << 16) |
+                                    0xFF000000;
+                    }
+                } else {
+                    std::memcpy(dstRow, srcRow, static_cast<size_t>(outBuffer.width) * 4);
+                }
+            }
+        } else {
+            // Nearest-neighbor scaled blit so any guest resolution fills ANativeWindow
+            for (int y = 0; y < outBuffer.height; ++y) {
+                int srcY = (y * srcHeight) / outBuffer.height;
+                const uint32_t* srcRow = reinterpret_cast<const uint32_t*>(src + srcY * srcStride);
+                uint32_t* dstRow = reinterpret_cast<uint32_t*>(dstPixels + y * outBuffer.stride * 4);
+
+                for (int x = 0; x < outBuffer.width; ++x) {
+                    int srcX = (x * srcWidth) / outBuffer.width;
+                    uint32_t p = srcRow[srcX];
+
+                    if (format == 0) {
+                        dstRow[x] = ((p & 0x00FF0000) >> 16) |
+                                    (p & 0x0000FF00)         |
+                                    ((p & 0x000000FF) << 16) |
+                                    (p & 0xFF000000);
+                    } else if (format == 1) {
+                        dstRow[x] = ((p & 0x00FF0000) >> 16) |
+                                    (p & 0x0000FF00)         |
+                                    ((p & 0x000000FF) << 16) |
+                                    0xFF000000;
+                    } else {
+                        dstRow[x] = p;
+                    }
+                }
+            }
         }
 
         ANativeWindow_unlockAndPost(m_nativeWindow);
@@ -464,6 +607,8 @@ private:
         m_globals.push_back({5, "zwp_tablet_manager_v2", 1});
         m_globals.push_back({6, "wl_seat", 7});
         m_globals.push_back({7, "wl_output", 4});
+        m_globals.push_back({8, "wl_data_device_manager", 3});
+        m_globals.push_back({9, "zxdg_decoration_manager_v1", 1});
     }
 
     uint32_t nextSerial() {
@@ -585,6 +730,16 @@ private:
                     scale.putInt32(std::max(1, static_cast<int>(m_scale)));
                     sendPacket(client.fd, scale);
 
+                    // Send name (v4)
+                    WaylandMessageWriter nameMsg(newId, 4);
+                    nameMsg.putString("WL-1");
+                    sendPacket(client.fd, nameMsg);
+
+                    // Send description (v4)
+                    WaylandMessageWriter descMsg(newId, 5);
+                    descMsg.putString("Xiaomi Pad 8 3200x2136 144Hz");
+                    sendPacket(client.fd, descMsg);
+
                     // Send done
                     WaylandMessageWriter done(newId, 2);
                     sendPacket(client.fd, done);
@@ -599,7 +754,13 @@ private:
                     nameMsg.putString("seat0");
                     sendPacket(client.fd, nameMsg);
                 } else if (iface == "xdg_wm_base") {
-                    // xdg_wm_base instantiated
+                    client.xdgWmBaseId = newId;
+                } else if (iface == "wl_subcompositor") {
+                    client.subcompositorId = newId;
+                } else if (iface == "wl_data_device_manager") {
+                    client.dataDeviceManagerId = newId;
+                } else if (iface == "zxdg_decoration_manager_v1") {
+                    client.decorationManagerId = newId;
                 } else if (iface == "zwp_tablet_manager_v2") {
                     client.tabletManagerId = newId;
                 }
@@ -614,24 +775,26 @@ private:
                 uint32_t poolId = reader.readUint32();
                 int32_t size = reader.readInt32();
 
-                ShmPool pool;
-                pool.poolId = poolId;
-                pool.size = size;
-                pool.fd = client.pendingFd;
+                auto storage = std::make_shared<ShmPoolStorage>();
+                storage->size = size;
+                storage->fd = client.pendingFd;
                 client.pendingFd = -1; // Consumed
 
-                if (pool.fd >= 0 && pool.size > 0) {
-                    pool.mappedData = reinterpret_cast<uint8_t*>(
-                        mmap(nullptr, pool.size, PROT_READ, MAP_SHARED, pool.fd, 0)
+                if (storage->fd >= 0 && storage->size > 0) {
+                    storage->mappedData = reinterpret_cast<uint8_t*>(
+                        mmap(nullptr, storage->size, PROT_READ, MAP_SHARED, storage->fd, 0)
                     );
-                    if (pool.mappedData == MAP_FAILED) {
+                    if (storage->mappedData == MAP_FAILED) {
                         LOGE("mmap failed for pool %u: %s", poolId, strerror(errno));
-                        pool.mappedData = nullptr;
+                        storage->mappedData = nullptr;
                     } else {
                         LOGI("wl_shm_pool %u created (fd: %d, size: %d, mapped: %p)",
-                             poolId, pool.fd, pool.size, pool.mappedData);
+                             poolId, storage->fd, storage->size, storage->mappedData);
                     }
                 }
+                ShmPool pool;
+                pool.poolId = poolId;
+                pool.storage = storage;
                 client.shmPools[poolId] = pool;
             }
             return;
@@ -651,7 +814,7 @@ private:
 
                 ShmBuffer buf;
                 buf.bufferId = bufferId;
-                buf.poolId = objId;
+                buf.storage = poolIt->second.storage;
                 buf.offset = offset;
                 buf.width = width;
                 buf.height = height;
@@ -660,9 +823,18 @@ private:
 
                 client.buffers[bufferId] = buf;
             } else if (opcode == 1) {
-                // wl_shm_pool.destroy
-                poolIt->second.cleanup();
+                // wl_shm_pool.destroy: Destroy protocol object, keep storage alive via buffers
                 client.shmPools.erase(poolIt);
+            }
+            return;
+        }
+
+        // 4b. wl_buffer requests
+        auto bufIt = client.buffers.find(objId);
+        if (bufIt != client.buffers.end()) {
+            if (opcode == 0) {
+                // wl_buffer.destroy
+                client.buffers.erase(bufIt);
             }
             return;
         }
@@ -695,16 +867,22 @@ private:
                 uint32_t callbackId = reader.readUint32();
                 surface.frameCallbacks.push_back(callbackId);
             } else if (opcode == 6) {
-                // wl_surface.commit() -> Blit the active buffer!
+                // wl_surface.commit() -> Blit the active window buffer!
                 if (surface.attachedBufferId > 0) {
                     auto bIt = client.buffers.find(surface.attachedBufferId);
                     if (bIt != client.buffers.end()) {
                         const auto& buf = bIt->second;
-                        auto pIt = client.shmPools.find(buf.poolId);
-                        if (pIt != client.shmPools.end() && pIt->second.mappedData != nullptr) {
-                            const uint8_t* pixels = pIt->second.mappedData + buf.offset;
-                            blitBufferToWindow(pixels, buf.width, buf.height, buf.stride);
+                        // Never blit cursor surfaces as the fullscreen window!
+                        // Only blit if it is an xdg_surface or a main display buffer (>= 320x240)
+                        bool isMainSurface = surface.isXdgSurface || (!surface.isCursor && buf.width >= 320 && buf.height >= 240);
+                        if (isMainSurface && buf.storage && buf.storage->mappedData != nullptr) {
+                            const uint8_t* pixels = buf.storage->mappedData + buf.offset;
+                            blitBufferToWindow(pixels, buf.width, buf.height, buf.stride, buf.format);
                         }
+
+                        // Send wl_buffer.release event so client knows buffer is available for reuse
+                        WaylandMessageWriter releaseMsg(surface.attachedBufferId, 0);
+                        sendPacket(client.fd, releaseMsg);
                     }
                 }
 
@@ -720,9 +898,249 @@ private:
             return;
         }
 
-        // 7. xdg_wm_base requests
-        if (opcode == 3) {
-            // xdg_wm_base.pong(serial)
+        // 7. wl_seat requests
+        if (client.seatId > 0 && objId == client.seatId) {
+            if (opcode == 0) {
+                // wl_seat.get_pointer(new_id)
+                client.pointerId = reader.readUint32();
+            } else if (opcode == 1) {
+                // wl_seat.get_keyboard(new_id)
+                client.keyboardId = reader.readUint32();
+                // Send repeat_info(rate = 25, delay = 300): opcode 5
+                WaylandMessageWriter rpt(client.keyboardId, 5);
+                rpt.putInt32(25);
+                rpt.putInt32(300);
+                sendPacket(client.fd, rpt);
+            } else if (opcode == 2) {
+                // wl_seat.get_touch(new_id)
+                client.touchId = reader.readUint32();
+            } else if (opcode == 3) {
+                // wl_seat.release
+                client.seatId = 0;
+            }
+            return;
+        }
+
+        // 7b. wl_pointer requests
+        if (client.pointerId > 0 && objId == client.pointerId) {
+            if (opcode == 0) {
+                // wl_pointer.set_cursor(serial, surface_id, hotspot_x, hotspot_y)
+                uint32_t serial = reader.readUint32();
+                uint32_t cursorSurfId = reader.readUint32();
+                int32_t hx = reader.readInt32();
+                int32_t hy = reader.readInt32();
+                if (cursorSurfId > 0) {
+                    client.surfaces[cursorSurfId].isCursor = true;
+                }
+            } else if (opcode == 1) {
+                // wl_pointer.release
+                client.pointerId = 0;
+            }
+            return;
+        }
+
+        // 8. xdg_wm_base requests
+        if (client.xdgWmBaseId > 0 && objId == client.xdgWmBaseId) {
+            if (opcode == 0) {
+                // xdg_wm_base.destroy
+                client.xdgWmBaseId = 0;
+            } else if (opcode == 1) {
+                // xdg_wm_base.create_positioner(new_id)
+                uint32_t posId = reader.readUint32();
+                client.xdgPositioners[posId] = {posId};
+            } else if (opcode == 2) {
+                // xdg_wm_base.get_xdg_surface(new_id, surface_id)
+                uint32_t newId = reader.readUint32();
+                uint32_t surfId = reader.readUint32();
+                XdgSurface xs;
+                xs.id = newId;
+                xs.surfaceId = surfId;
+                client.xdgSurfaces[newId] = xs;
+                client.surfaces[surfId].isXdgSurface = true;
+            } else if (opcode == 3) {
+                // xdg_wm_base.pong(serial)
+            }
+            return;
+        }
+
+        // 9. xdg_positioner requests
+        auto posIt = client.xdgPositioners.find(objId);
+        if (posIt != client.xdgPositioners.end()) {
+            if (opcode == 0) {
+                client.xdgPositioners.erase(posIt);
+            }
+            return;
+        }
+
+        // 10. xdg_surface requests
+        auto xdgSurfIt = client.xdgSurfaces.find(objId);
+        if (xdgSurfIt != client.xdgSurfaces.end()) {
+            auto& xs = xdgSurfIt->second;
+            if (opcode == 0) {
+                // xdg_surface.destroy
+                client.xdgSurfaces.erase(xdgSurfIt);
+            } else if (opcode == 1) {
+                // xdg_surface.get_toplevel(new_id)
+                uint32_t toplevelId = reader.readUint32();
+                XdgToplevel tl;
+                tl.id = toplevelId;
+                tl.surfaceId = xs.surfaceId;
+                client.xdgToplevels[toplevelId] = tl;
+                xs.toplevelId = toplevelId;
+
+                // Send xdg_toplevel.configure(width, height, states)
+                WaylandMessageWriter tlConfig(toplevelId, 0);
+                tlConfig.putInt32(m_width);
+                tlConfig.putInt32(m_height);
+                uint32_t states[] = {1, 4}; // XDG_TOPLEVEL_STATE_MAXIMIZED (1), XDG_TOPLEVEL_STATE_ACTIVATED (4)
+                tlConfig.putArray(states, sizeof(states));
+                sendPacket(client.fd, tlConfig);
+
+                // Send xdg_surface.configure(serial)
+                uint32_t serial = nextSerial();
+                xs.lastConfigureSerial = serial;
+                WaylandMessageWriter surfConfig(xs.id, 0);
+                surfConfig.putUint32(serial);
+                sendPacket(client.fd, surfConfig);
+            } else if (opcode == 2) {
+                // xdg_surface.get_popup(new_id, parent, positioner)
+                uint32_t popupId = reader.readUint32();
+                XdgPopup xp;
+                xp.id = popupId;
+                xp.surfaceId = xs.surfaceId;
+                client.xdgPopups[popupId] = xp;
+                xs.popupId = popupId;
+
+                WaylandMessageWriter popConfig(popupId, 0);
+                popConfig.putInt32(0);
+                popConfig.putInt32(0);
+                popConfig.putInt32(m_width);
+                popConfig.putInt32(m_height);
+                sendPacket(client.fd, popConfig);
+
+                uint32_t serial = nextSerial();
+                xs.lastConfigureSerial = serial;
+                WaylandMessageWriter surfConfig(xs.id, 0);
+                surfConfig.putUint32(serial);
+                sendPacket(client.fd, surfConfig);
+            } else if (opcode == 3) {
+                // xdg_surface.set_window_geometry
+            } else if (opcode == 4) {
+                // xdg_surface.ack_configure(serial)
+                xs.configured = true;
+            }
+            return;
+        }
+
+        // 11. xdg_toplevel requests
+        auto tlIt = client.xdgToplevels.find(objId);
+        if (tlIt != client.xdgToplevels.end()) {
+            if (opcode == 0) {
+                client.xdgToplevels.erase(tlIt);
+            } else if (opcode == 2) {
+                tlIt->second.title = reader.readString();
+            } else if (opcode == 3) {
+                tlIt->second.appId = reader.readString();
+            }
+            return;
+        }
+
+        // 12. xdg_popup requests
+        auto popIt = client.xdgPopups.find(objId);
+        if (popIt != client.xdgPopups.end()) {
+            if (opcode == 0) {
+                client.xdgPopups.erase(popIt);
+            }
+            return;
+        }
+
+        // 13. wl_subcompositor requests
+        if (client.subcompositorId > 0 && objId == client.subcompositorId) {
+            if (opcode == 0) {
+                client.subcompositorId = 0;
+            } else if (opcode == 1) {
+                // get_subsurface(new_id, surface, parent)
+                uint32_t newId = reader.readUint32();
+                uint32_t surfId = reader.readUint32();
+                uint32_t parentId = reader.readUint32();
+                Subsurface sub;
+                sub.id = newId;
+                sub.surfaceId = surfId;
+                sub.parentId = parentId;
+                client.subsurfaces[newId] = sub;
+            }
+            return;
+        }
+
+        auto subIt = client.subsurfaces.find(objId);
+        if (subIt != client.subsurfaces.end()) {
+            if (opcode == 0) {
+                client.subsurfaces.erase(subIt);
+            }
+            return;
+        }
+
+        // 14. wl_data_device_manager requests
+        if (client.dataDeviceManagerId > 0 && objId == client.dataDeviceManagerId) {
+            if (opcode == 0) {
+                client.dataSources.insert(reader.readUint32());
+            } else if (opcode == 1) {
+                client.dataDevices.insert(reader.readUint32());
+            }
+            return;
+        }
+
+        if (client.dataSources.count(objId) > 0) {
+            if (opcode == 1) {
+                client.dataSources.erase(objId);
+            }
+            return;
+        }
+
+        if (client.dataDevices.count(objId) > 0) {
+            if (opcode == 2) {
+                client.dataDevices.erase(objId);
+            }
+            return;
+        }
+
+        // 15. zxdg_decoration_manager_v1 requests
+        if (client.decorationManagerId > 0 && objId == client.decorationManagerId) {
+            if (opcode == 0) {
+                client.decorationManagerId = 0;
+            } else if (opcode == 1) {
+                uint32_t newId = reader.readUint32();
+                uint32_t tlId = reader.readUint32();
+                ToplevelDecoration dec;
+                dec.id = newId;
+                dec.toplevelId = tlId;
+                dec.mode = 1; // client-side decoration
+                client.decorations[newId] = dec;
+
+                WaylandMessageWriter decCfg(newId, 0); // configure(mode = 1)
+                decCfg.putUint32(1);
+                sendPacket(client.fd, decCfg);
+            }
+            return;
+        }
+
+        auto decIt = client.decorations.find(objId);
+        if (decIt != client.decorations.end()) {
+            if (opcode == 0) {
+                client.decorations.erase(decIt);
+            } else if (opcode == 1) {
+                uint32_t mode = reader.readUint32();
+                decIt->second.mode = mode;
+                WaylandMessageWriter decCfg(objId, 0);
+                decCfg.putUint32(mode);
+                sendPacket(client.fd, decCfg);
+            } else if (opcode == 2) {
+                decIt->second.mode = 1;
+                WaylandMessageWriter decCfg(objId, 0);
+                decCfg.putUint32(1);
+                sendPacket(client.fd, decCfg);
+            }
+            return;
         }
     }
 
@@ -738,7 +1156,7 @@ private:
             }
 
             {
-                std::lock_guard<std::mutex> lock(m_mutex);
+                std::lock_guard<std::recursive_mutex> lock(m_mutex);
                 for (const auto& pair : m_clients) {
                     if (pair.first >= 0) {
                         pollFds.push_back({pair.first, POLLIN | POLLHUP | POLLERR, 0});
@@ -761,7 +1179,7 @@ private:
                 int clientFd = accept4(m_serverFd, reinterpret_cast<struct sockaddr*>(&clientAddr),
                                        &clientLen, SOCK_NONBLOCK | SOCK_CLOEXEC);
                 if (clientFd >= 0) {
-                    std::lock_guard<std::mutex> lock(m_mutex);
+                    std::lock_guard<std::recursive_mutex> lock(m_mutex);
                     WaylandClient c;
                     c.fd = clientFd;
                     m_clients[clientFd] = c;
@@ -784,7 +1202,7 @@ private:
                     if (n <= 0) {
                         deadFds.push_back(pfd.fd);
                     } else {
-                        std::lock_guard<std::mutex> lock(m_mutex);
+                        std::lock_guard<std::recursive_mutex> lock(m_mutex);
                         auto it = m_clients.find(pfd.fd);
                         if (it != m_clients.end()) {
                             auto& client = it->second;
@@ -798,8 +1216,8 @@ private:
                             // Parse complete protocol packets: header is 8 bytes
                             while (client.recvBuffer.size() >= 8) {
                                 uint32_t objId = *reinterpret_cast<const uint32_t*>(&client.recvBuffer[0]);
-                                uint16_t msgSize = *reinterpret_cast<const uint16_t*>(&client.recvBuffer[4]);
-                                uint16_t opcode = *reinterpret_cast<const uint16_t*>(&client.recvBuffer[6]);
+                                uint16_t opcode = *reinterpret_cast<const uint16_t*>(&client.recvBuffer[4]);
+                                uint16_t msgSize = *reinterpret_cast<const uint16_t*>(&client.recvBuffer[6]);
 
                                 if (msgSize < 8 || client.recvBuffer.size() < msgSize) {
                                     break;
@@ -808,6 +1226,7 @@ private:
                                 const uint8_t* payload = client.recvBuffer.data() + 8;
                                 size_t payloadLen = msgSize - 8;
 
+                                LOGI("Dispatching Wayland msg: objId=%u, opcode=%u, msgSize=%u", objId, opcode, msgSize);
                                 dispatchMessage(client, objId, opcode, payload, payloadLen);
 
                                 client.recvBuffer.erase(client.recvBuffer.begin(),
@@ -819,7 +1238,7 @@ private:
             }
 
             if (!deadFds.empty()) {
-                std::lock_guard<std::mutex> lock(m_mutex);
+                std::lock_guard<std::recursive_mutex> lock(m_mutex);
                 for (int fd : deadFds) {
                     auto it = m_clients.find(fd);
                     if (it != m_clients.end()) {
@@ -837,10 +1256,12 @@ private:
 
     std::atomic<bool> m_running;
     int m_serverFd;
+    int m_lockFd{-1};
     std::string m_socketDir;
     std::string m_socketPath;
+    std::string m_lockPath;
     std::thread m_serverThread;
-    std::mutex m_mutex;
+    std::recursive_mutex m_mutex;
 
     ANativeWindow* m_nativeWindow;
     int m_width;

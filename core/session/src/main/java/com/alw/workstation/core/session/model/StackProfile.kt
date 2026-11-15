@@ -333,7 +333,7 @@ data class StackProfile(
                     execCommand = "labwc",
                     configMode = ConfigMode.SAFE_MODE,
                     sessionConfigPath = "/tmp/android-safe-mode.conf",
-                    extraArgs = listOf("-s", "kitty")
+                    extraArgs = listOf("-s", "weston-terminal")
                 ),
                 gpu = GpuConfig(
                     driverMode = DriverMode.LLVMPIPE,

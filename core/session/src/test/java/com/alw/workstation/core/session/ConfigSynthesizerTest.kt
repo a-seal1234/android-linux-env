@@ -80,7 +80,7 @@ class ConfigSynthesizerTest {
         val rcXml = ConfigSynthesizer.generateDefaultLabwcRcXml(profile)
 
         assertTrue(rcXml.contains("<labwc_config>"))
-        assertTrue(rcXml.contains("<keybind key=\"W-Return\"><action name=\"Execute\" command=\"kitty\" /></keybind>"))
+        assertTrue(rcXml.contains("<keybind key=\"W-Return\"><action name=\"Execute\" command=\"weston-terminal\" /></keybind>"))
         assertTrue(rcXml.contains("<keybind key=\"W-q\"><action name=\"Close\" /></keybind>"))
         assertTrue(rcXml.contains("<keybind key=\"W-m\"><action name=\"Exit\" /></keybind>"))
         assertTrue(rcXml.contains("<naturalScroll>true</naturalScroll>"))
@@ -91,7 +91,7 @@ class ConfigSynthesizerTest {
         val autostart = ConfigSynthesizer.generateDefaultLabwcAutostart()
         assertTrue(autostart.contains("pipewire &"))
         assertTrue(autostart.contains("wireplumber &"))
-        assertTrue(autostart.contains("kitty &"))
+        assertTrue(autostart.contains("weston-terminal &"))
     }
 
     @Test

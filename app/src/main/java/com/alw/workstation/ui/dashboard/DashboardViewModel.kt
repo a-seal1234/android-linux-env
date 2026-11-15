@@ -1,5 +1,6 @@
 package com.alw.workstation.ui.dashboard
 
+import android.util.Log
 import com.alw.workstation.bridge.wayland.audio.AudioBridgeManager
 import com.alw.workstation.bridge.wayland.input.InputProfile
 import com.alw.workstation.core.proot.RootfsExtractor
@@ -39,6 +40,7 @@ class DashboardViewModel(
     private val orchestrator: CompositorOrchestrator? = null,
     val audioBridgeManager: AudioBridgeManager = AudioBridgeManager(),
     val shizukuManager: ShizukuCompanionManager? = null,
+    val serverManager: com.alw.workstation.bridge.wayland.WaylandServerManager? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main
 ) {
@@ -165,6 +167,13 @@ class DashboardViewModel(
             runtimeDir.mkdirs()
         }
 
+        val width = profile.display.customWidth ?: 3200
+        val height = profile.display.customHeight ?: 2136
+        val scale = profile.display.scaleFactor
+
+        // Start Wayland protocol server
+        serverManager?.startServer(runtimeDir, width, height, scale)
+
         // Start audio bridge and attach to session
         audioBridgeManager.coordinateWith(sessionController, runtimeDir, scope)
 
@@ -176,15 +185,20 @@ class DashboardViewModel(
                 val outcome = orchestrator.launchSession(
                     profile = profile,
                     sessionRuntimeDir = runtimeDir,
-                    rootfsDir = rootfsDir
+                    rootfsDir = rootfsDir,
+                    onStdoutLine = { Log.i("ALW_Proot", it) },
+                    onStderrLine = { Log.e("ALW_Proot", it) }
                 )
                 withContext(mainDispatcher) {
                     when (outcome) {
                         is CompositorOrchestrator.LaunchOutcome.Success -> {
+                            serverManager?.stopServer()
                             sessionController.stopSession()
                             refresh()
                         }
                         is CompositorOrchestrator.LaunchOutcome.FallbackTriggered -> {
+                            serverManager?.stopServer()
+                            sessionController.stopSession()
                             _uiState.update {
                                 it.copy(
                                     sessionState = SessionState.SafeModeFallback(
@@ -196,6 +210,7 @@ class DashboardViewModel(
                             }
                         }
                         is CompositorOrchestrator.LaunchOutcome.Error -> {
+                            serverManager?.stopServer()
                             sessionController.updateState(SessionState.Error(outcome.message))
                             _uiState.update { it.copy(errorMessage = outcome.message) }
                         }
@@ -206,6 +221,7 @@ class DashboardViewModel(
     }
 
     fun stopSession() {
+        serverManager?.stopServer()
         sessionController.stopSession()
         audioBridgeManager.stopAudioServer()
         _uiState.update { it.copy(sessionState = SessionState.Stopped) }

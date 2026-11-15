@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -81,6 +82,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Configure transparent window background so embedded SurfaceView punches through
+        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+
         // Initialize runtime directories and engines
         dirs = RuntimeDirectories(
             filesDir = filesDir,
@@ -128,7 +132,8 @@ class MainActivity : ComponentActivity() {
             sessionController = sessionController,
             orchestrator = orchestrator,
             audioBridgeManager = audioBridgeManager,
-            shizukuManager = shizukuCompanionManager
+            shizukuManager = shizukuCompanionManager,
+            serverManager = serverManager
         )
 
         stackConfiguratorViewModel = StackConfiguratorViewModel(
@@ -202,7 +207,7 @@ fun WorkstationAppRoot(
     val dashboardState by dashboardViewModel.uiState.collectAsState()
 
     var currentScreen by remember {
-        val initialScreen = if (rootfsManager.listRootfs().isEmpty()) {
+        val initialScreen = if (!rootfsManager.hasAnyRootfs()) {
             AppScreen.WIZARD
         } else {
             AppScreen.DASHBOARD
@@ -210,7 +215,11 @@ fun WorkstationAppRoot(
         mutableStateOf(initialScreen)
     }
 
-    Surface(modifier = Modifier.fillMaxSize()) {
+    val surfaceColor = if (currentScreen == AppScreen.SESSION) androidx.compose.ui.graphics.Color.Transparent else MaterialTheme.colorScheme.background
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = surfaceColor
+    ) {
         when (currentScreen) {
             AppScreen.WIZARD -> {
                 WizardScreen(

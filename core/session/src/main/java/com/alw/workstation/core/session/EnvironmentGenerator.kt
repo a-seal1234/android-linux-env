@@ -31,7 +31,7 @@ object EnvironmentGenerator {
             StackProfile.DriverMode.TURNIP_KGSL,
             StackProfile.DriverMode.TURNIP_ZINK,
             StackProfile.DriverMode.ADRENO_PROPRIETARY_ZINK -> "gles2"
-            StackProfile.DriverMode.LLVMPIPE -> "gles2"
+            StackProfile.DriverMode.LLVMPIPE -> "pixman"
             StackProfile.DriverMode.VIRGL -> "gles2"
         }
         env["XDG_CURRENT_DESKTOP"] = when (profile.compositor.type) {

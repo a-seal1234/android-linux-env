@@ -35,6 +35,8 @@ class WaylandSurfaceView @JvmOverloads constructor(
         }
 
     init {
+        setZOrderOnTop(true)
+        holder.setFormat(android.graphics.PixelFormat.RGBA_8888)
         holder.addCallback(this)
         isFocusable = true
         isFocusableInTouchMode = true

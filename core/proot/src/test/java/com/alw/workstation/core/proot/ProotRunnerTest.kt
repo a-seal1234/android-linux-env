@@ -83,7 +83,7 @@ class ProotRunnerTest {
         assertTrue(cmd.arguments.contains("dbus-run-session"))
         assertTrue(cmd.arguments.contains("labwc"))
         assertTrue(cmd.arguments.contains("-s"))
-        assertTrue(cmd.arguments.contains("kitty"))
+        assertTrue(cmd.arguments.contains("weston-terminal"))
     }
 
     @Test

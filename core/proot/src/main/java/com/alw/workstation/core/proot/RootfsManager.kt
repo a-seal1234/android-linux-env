@@ -47,16 +47,26 @@ class RootfsManager(private val dirs: RuntimeDirectories) {
     }
 
     /**
+     * Checks if at least one valid rootfs is installed without walking file trees.
+     */
+    fun hasAnyRootfs(): Boolean {
+        dirs.ensureDirectoriesExist()
+        val base = dirs.rootfsBaseDir
+        if (!base.exists() || !base.isDirectory) return false
+        return base.listFiles()?.any { it.isDirectory && checkRootfsValidity(it) } ?: false
+    }
+
+    /**
      * Lists all rootfs directories installed under files/rootfs/<id>.
      */
-    fun listRootfs(): List<RootfsInfo> {
+    fun listRootfs(calculateSizes: Boolean = false): List<RootfsInfo> {
         dirs.ensureDirectoriesExist()
         val base = dirs.rootfsBaseDir
         if (!base.exists() || !base.isDirectory) return emptyList()
 
         val subdirs = base.listFiles()?.filter { it.isDirectory } ?: emptyList()
         return subdirs.map { dir ->
-            buildRootfsInfo(dir.name, dir)
+            buildRootfsInfo(dir.name, dir, calculateSizes)
         }.sortedBy { it.id }
     }
 
@@ -67,14 +77,14 @@ class RootfsManager(private val dirs: RuntimeDirectories) {
         validateRootfsId(rootfsId)
         val dir = dirs.getRootfsDir(rootfsId)
         if (!dir.exists() || !dir.isDirectory) return null
-        return buildRootfsInfo(rootfsId, dir)
+        return buildRootfsInfo(rootfsId, dir, calculateSizes = false)
     }
 
-    private fun buildRootfsInfo(id: String, dir: File): RootfsInfo {
+    private fun buildRootfsInfo(id: String, dir: File, calculateSizes: Boolean = false): RootfsInfo {
         val isValid = checkRootfsValidity(dir)
         val isProvisioned = File(dir, PROVISIONED_MARKER).exists()
         val sessions = discoverWaylandSessions(id)
-        val size = calculateDirectorySize(dir)
+        val size = if (calculateSizes) calculateDirectorySize(dir) else 0L
 
         return RootfsInfo(
             id = id,

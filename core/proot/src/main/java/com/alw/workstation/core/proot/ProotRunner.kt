@@ -192,8 +192,8 @@ class ProotRunner(
             runnerEnv["LD_LIBRARY_PATH"] = dirs.nativeLibDir
         }
 
-        // 14. Resolve Android linker64 execution wrapper for PIE .so files
-        val useLinker = prootBinaryPath.endsWith(".so") && File("/system/bin/linker64").exists()
+        // 14. Resolve execution binary (direct execution if binary is executable, otherwise fallback to linker64 if needed)
+        val useLinker = prootBinaryPath.endsWith(".so") && !File(prootBinaryPath).canExecute() && File("/system/bin/linker64").canExecute()
         val binary = if (useLinker) "/system/bin/linker64" else prootBinaryPath
         val finalArgs = if (useLinker) listOf(prootBinaryPath) + args else args
 

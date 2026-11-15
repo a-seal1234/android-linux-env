@@ -69,6 +69,12 @@ object ArchProvisioningScriptBuilder {
             appendLine("        printf 'Server = http://de4.mirror.archlinuxarm.org/\$arch/\$repo\\nServer = http://de3.mirror.archlinuxarm.org/\$arch/\$repo\\n' | cat - /etc/pacman.d/mirrorlist > /etc/pacman.d/mirrorlist.tmp && mv /etc/pacman.d/mirrorlist.tmp /etc/pacman.d/mirrorlist")
             appendLine("    fi")
             appendLine("fi")
+            appendLine("# Ensure pacman DBPath is specified without a trailing slash to prevent PRoot stat ENOTDIR issues")
+            appendLine("if [ -f /etc/pacman.conf ]; then")
+            appendLine("    if ! grep -q '^DBPath' /etc/pacman.conf; then")
+            appendLine("        sed -i '/\\[options\\]/a DBPath = /var/lib/pacman' /etc/pacman.conf")
+            appendLine("    fi")
+            appendLine("fi")
             if (config.ignoreKernelPackages) {
                 appendLine("# Prevent kernel and initramfs hooks from executing inside PRoot")
                 appendLine("if [ -f /etc/pacman.conf ]; then")

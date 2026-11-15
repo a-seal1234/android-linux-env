@@ -14,6 +14,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import com.alw.workstation.bridge.wayland.InputDispatcher
 import com.alw.workstation.bridge.wayland.WaylandServerManager
 import com.alw.workstation.bridge.wayland.WaylandSurfaceView
@@ -30,9 +32,7 @@ fun SessionSurfaceScreen(
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
+        modifier = Modifier.fillMaxSize()
     ) {
         // Native Embedded Wayland SurfaceView
         AndroidView(
@@ -51,33 +51,36 @@ fun SessionSurfaceScreen(
             }
         )
 
-        // Collapsible Floating Control Pill Overlay
-        FloatingControlPill(
-            inputProfile = state.inputProfile,
-            audioStatus = state.audioStatus,
-            sessionState = state.sessionState,
-            onSwitchInputProfile = { newProfile ->
-                dashboardViewModel.switchInputProfile(newProfile)
-            },
-            onSetVolume = { vol ->
-                dashboardViewModel.audioBridgeManager.setVolume(vol)
-            },
-            onReloadHyprland = {
-                dashboardViewModel.sendHyprlandIpc("reload", scope)
-            },
-            onRegenerateDotfiles = {
-                dashboardViewModel.regenerateDefaultDotfiles(scope)
-            },
-            onToggleSafeMode = {
-                dashboardViewModel.triggerSafeMode()
-            },
-            onStopSession = {
-                dashboardViewModel.stopSession()
-                onStopSession()
-            },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp)
-        )
+        // Collapsible Floating Control Pill Overlay (hosted in Popup to float above SurfaceView)
+        Popup(
+            alignment = Alignment.TopEnd,
+            properties = PopupProperties(focusable = false)
+        ) {
+            FloatingControlPill(
+                inputProfile = state.inputProfile,
+                audioStatus = state.audioStatus,
+                sessionState = state.sessionState,
+                onSwitchInputProfile = { newProfile ->
+                    dashboardViewModel.switchInputProfile(newProfile)
+                },
+                onSetVolume = { vol ->
+                    dashboardViewModel.audioBridgeManager.setVolume(vol)
+                },
+                onReloadHyprland = {
+                    dashboardViewModel.sendHyprlandIpc("reload", scope)
+                },
+                onRegenerateDotfiles = {
+                    dashboardViewModel.regenerateDefaultDotfiles(scope)
+                },
+                onToggleSafeMode = {
+                    dashboardViewModel.triggerSafeMode()
+                },
+                onStopSession = {
+                    dashboardViewModel.stopSession()
+                    onStopSession()
+                },
+                modifier = Modifier.padding(16.dp)
+            )
+        }
     }
 }
