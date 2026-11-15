@@ -60,4 +60,4 @@ Implement an automated PRoot compatibility shim layer in `/usr/local/bin` (which
 - **Prerequisites:** TASK-019, TASK-005
 - **Implementation Gate:** Completed.
 - **Verification Gate:** All unit tests pass, assembleDebug passes, verified on connected physical Xiaomi Pad 8 (`d370854b`).
-- **Review Gate:** Complete task handoff and evidence documentation in [verification.md](evidence/verification.md). Status: **Planned**.
+- **Review Gate:** Complete task handoff and evidence documentation in [verification.md](evidence/verification.md). Status: **Done**.

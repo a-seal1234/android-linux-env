@@ -84,6 +84,10 @@ class ProotRunner(
             args.add(mount.toCliArg())
         }
 
+        // Materialize PRoot rice compatibility shims (systemctl, fakeroot, makepkg, sudo) in /usr/local/bin
+        val guestLocalBin = File(rootfsDir, "usr/local/bin")
+        com.alw.workstation.core.proot.shim.RiceShimGenerator.installShims(guestLocalBin)
+
         // 5. Direct Adreno KGSL hardware GPU device node & Fallback check
         val isKgslAccessible = kgslNodeChecker(profile.gpu.kgslNode)
         val requiresKgsl = profile.gpu.driverMode != StackProfile.DriverMode.LLVMPIPE

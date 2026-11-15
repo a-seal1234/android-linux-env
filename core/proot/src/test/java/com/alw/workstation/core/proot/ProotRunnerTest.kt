@@ -47,6 +47,13 @@ class ProotRunnerTest {
         assertTrue(cmd.arguments.contains("/sys"))
         assertTrue(cmd.arguments.contains("/dev/kgsl-3d0"))
 
+        // Check rice compatibility shims in /usr/local/bin
+        val guestLocalBin = File(tempDir, "rootfs/archlinux-default/usr/local/bin")
+        assertTrue(File(guestLocalBin, "systemctl").canExecute())
+        assertTrue(File(guestLocalBin, "fakeroot").canExecute())
+        assertTrue(File(guestLocalBin, "makepkg").canExecute())
+        assertTrue(File(guestLocalBin, "sudo").canExecute())
+
         // Check build cache redirection env vars
         val envArgs = cmd.arguments.filter { it.contains("=") }
         assertTrue(envArgs.any { it.startsWith("CARGO_TARGET_DIR=/home/alw/.cache/cargo-target") })
