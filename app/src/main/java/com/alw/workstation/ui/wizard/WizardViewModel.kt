@@ -1,5 +1,6 @@
 package com.alw.workstation.ui.wizard
 
+import android.util.Log
 import com.alw.workstation.core.proot.ProotRunner
 import com.alw.workstation.core.proot.RootfsDownloader
 import com.alw.workstation.core.proot.RootfsExtractor
@@ -269,7 +270,10 @@ class WizardViewModel(
         }
 
         val externalDriverId = when (state.driverOption) {
-            DriverStoreOption.ONLINE_RELEASE -> state.selectedReleaseTag ?: "turnip-mesa-25.0-adreno825"
+            DriverStoreOption.ONLINE_RELEASE -> {
+                state.availableReleases.firstOrNull { it.releaseTag == state.selectedReleaseTag }?.version
+                    ?: state.selectedReleaseTag ?: "turnip-mesa-25.0.0-adreno825"
+            }
             DriverStoreOption.LOCAL_ARCHIVE -> state.localDriverPath?.let { File(it).nameWithoutExtension } ?: "local-turnip"
             DriverStoreOption.SOFTWARE_FALLBACK -> "system-fallback"
         }
@@ -437,11 +441,30 @@ class WizardViewModel(
                 // 2.1 Ensure selected Turnip KGSL driver is installed if online release chosen
                 if (state.driverOption == DriverStoreOption.ONLINE_RELEASE && state.selectedReleaseTag != null) {
                     val release = state.availableReleases.firstOrNull { it.releaseTag == state.selectedReleaseTag }
-                    if (release != null && !driverManager.isDriverInstalled(release.version)) {
-                        _uiState.update {
-                            it.copy(provisioningStepDescription = "Installing Turnip KGSL driver ${release.version}...")
+                    if (release != null) {
+                        if (!driverManager.isDriverInstalled(release.version)) {
+                            _uiState.update {
+                                it.copy(provisioningStepDescription = "Installing Turnip KGSL driver ${release.version}...")
+                            }
+                            try {
+                                driverManager.installDriverRelease(release)
+                            } catch (e: Exception) {
+                                Log.w("WizardViewModel", "External driver release unavailable (${e.message}). Proceeding with system fallback.")
+                                _uiState.update { current ->
+                                    current.copy(
+                                        provisioningLogs = current.provisioningLogs +
+                                            "Notice: Turnip driver ${release.version} unavailable online (${e.message ?: "network error"}). Proceeding with system default Mesa."
+                                    )
+                                }
+                            }
+                        } else {
+                            _uiState.update { current ->
+                                current.copy(
+                                    provisioningLogs = current.provisioningLogs +
+                                        "Turnip KGSL driver ${release.version} verified in shared store."
+                                )
+                            }
                         }
-                        driverManager.installDriverRelease(release)
                     }
                 }
 

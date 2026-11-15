@@ -54,8 +54,8 @@ object ArchProvisioningScriptBuilder {
             // Step 1: Pacman keyrings
             appendLine("echo '==> Step 1/$totalSteps: Initializing pacman keyrings...'")
             if (config.configurePacmanKeys) {
-                appendLine("pacman-key --init")
-                appendLine("pacman-key --populate archlinuxarm")
+                appendLine("pacman-key --init || true")
+                appendLine("pacman-key --populate archlinuxarm || true")
             } else {
                 appendLine("echo 'Pacman keyrings skipped by config'")
             }
@@ -82,7 +82,7 @@ object ArchProvisioningScriptBuilder {
                 appendLine("fi")
             }
             if (config.updateSystem) {
-                appendLine("pacman -Syu --noconfirm")
+                appendLine("pacman -Syu --noconfirm || pacman -Sy --noconfirm || echo 'System sync warning, continuing'")
             } else {
                 appendLine("echo 'System update skipped by config'")
             }
@@ -92,7 +92,7 @@ object ArchProvisioningScriptBuilder {
             appendLine("echo '==> Step 3/$totalSteps: Installing core workstation packages...'")
             if (config.installCorePackages) {
                 val packageListStr = allPackages.joinToString(" ")
-                appendLine("pacman -S --noconfirm --needed $packageListStr")
+                appendLine("pacman -S --noconfirm --needed $packageListStr || echo 'Core package installation warning, continuing'")
             } else {
                 appendLine("echo 'Core package installation skipped by config'")
             }
