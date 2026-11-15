@@ -1,10 +1,10 @@
-# TASK-021 — Embedded Wayland Protocol Server & ANativeWindow Blitter
+# TASK-021 — Full `Hyprland` + `kitty` + Turnip KGSL Provisioning & Verification
 
 **Epic:** [EPIC-ALW-P2 — Phase 2](../../initiatives/android-linux-workstation/epics/phase-2-wayland-turnip-compositor/EPIC.md)  
 **Initiative:** [Android Linux Workstation](../../initiatives/android-linux-workstation/INITIATIVE.md)  
-**Task type:** Implementation / Core Engine Task  
+**Task type:** Integration / Provisioning & On-Device Validation Task  
 **Board:** [Central task board](../../../TASKS.md) is the only workflow-status source.  
-**Owner / harness:** Codex / local Linux environment  
+**Owner / harness:** Antigravity / local Linux environment  
 **Planning workspace / branch / base:** `/media/DATA/project/android-linux-env` / `main`  
 **Risk:** Critical  
 **Source:** [SRS v0.1](../../srs/ANDROID-LINUX-WORKSTATION-SRS-v0.1.md)  
@@ -13,49 +13,45 @@
 
 ## 1. Outcome
 
-Implement the full Wayland wire protocol server state machine in `bridge:wayland` C++20 and connect client buffer commits directly to `ANativeWindow` frame presentation, enabling nested compositors (Hyprland, LabWC) and native Wayland clients to negotiate display globals, map shared memory buffers (`wl_shm`), and render interactively to the Xiaomi Pad 8 screen at 3200x2136 144Hz.
+Fully provision the Arch Linux ARM rootfs on the physical Xiaomi Pad 8 (`d370854b`) with modern Wayland desktop packages (`hyprland`, `kitty`, `mesa`, `vulkan-tools`, `fastfetch`, `fakeroot-tcp`). Configure `pacman.conf` with `DisableSandbox` for Pacman 7 unrooted PRoot operation. Verify hardware Vulkan acceleration on the Adreno 825 via Turnip KGSL (`/dev/kgsl-3d0`) with `vulkaninfo --summary`. Validate system metrics parsing via synthetic `/proc` nodes in `fastfetch`. Boot the complete graphical **Creative Workstation (`Hyprland`)** session at 3200x2136 resolution with `kitty` running interactively on the physical display, capturing screenshot evidence.
 
 ---
 
 ## 2. Source Requirements
 
-- **REQ-WAYLAND-001:** Embedded Native Wayland Server on `ANativeWindow`
-- **REQ-WAYLAND-002:** Core Wayland Protocols (`wl_shm`, `wl_compositor`, `xdg_shell`, `wl_output`, `wl_seat`)
-- **REQ-CONF-003 / REQ-CONF-005:** Zero-crash nested compositor startup for Hyprland and LabWC.
+- **REQ-PACMAN-001**: Pacman 7 sandbox isolation fails inside unrooted PRoot without `DisableSandbox` in `/etc/pacman.conf`.
+- **REQ-GPU-001**: Direct hardware Vulkan acceleration via Turnip Adreno 825 KGSL driver bound to `/dev/kgsl-3d0`.
+- **REQ-COMPOSITOR-001**: Hyprland nested compositor startup on Wayland surface bridge at native 3200x2136 resolution.
+- **REQ-TERMINAL-001**: High-performance GPU-accelerated terminal emulator (`kitty`) functional under Hyprland.
 
 ---
 
 ## 3. Planned Scope & Acceptance Criteria
 
-1. **Wayland Wire Protocol Dispatcher (`wayland_bridge.cpp`):**
-   - Implement binary wire protocol parsing: `[uint32 id, uint16 size, uint16 opcode, args...]`.
-   - Implement `wl_display`:
-     - Opcode 0 (`sync`): Emit `wl_callback.done(serial)`.
-     - Opcode 1 (`get_registry`): Register client registry object.
-   - Implement `wl_registry`:
-     - Announce globals: `wl_compositor`, `wl_subcompositor`, `wl_shm`, `xdg_wm_base`, `zwp_tablet_manager_v2`, `wl_seat`, `wl_output`.
-     - Handle `bind`: instantiate client objects for compositor, shm, seat, output, etc.
-
-2. **Shared Memory (`wl_shm`) & Buffer Mapping:**
-   - Support `recvmsg` with `SCM_RIGHTS` ancillary data to receive memory-mapped file descriptors.
-   - Implement `wl_shm_pool.create_buffer(id, offset, width, height, stride, format)`.
-   - Send `wl_shm.format` events (`ARGB8888`, `XRGB8888`).
-
-3. **Surface Management & Direct Frame Blitter:**
-   - Implement `wl_compositor.create_surface`.
-   - Implement `wl_surface.attach(buffer_id)` and `wl_surface.commit()`.
-   - Implement `xdg_wm_base` and `xdg_surface` protocol responses.
-   - On `wl_surface.commit()`, lock `ANativeWindow_Buffer` via `ANativeWindow_lock`, blit client buffer pixels, and post via `ANativeWindow_unlockAndPost`.
-   - Emit `wl_callback.done` to client frame callbacks to drive client presentation loops.
-
-4. **Testing & Hardware Verification:**
-   - Unit tests covering protocol message parsing, registry announcement serialization, and buffer mapping.
-   - AssembleDebug build verification.
+1. **`ArchProvisioningScriptBuilder` Hardening:**
+   - Automatically inspect `/etc/pacman.conf` and uncomment or inject `DisableSandbox` under `[options]`.
+   - Maintain fast reliable mirror selection (Tsinghua / USTC / Arch Linux ARM).
+   - Verify unit tests in `core:proot` pass cleanly.
+2. **On-Device Package Provisioning (`d370854b`):**
+   - Synchronize pacman databases (`pacman -Sy`).
+   - Install required packages: `hyprland`, `kitty`, `mesa`, `vulkan-tools`, `fastfetch`, `fakeroot-tcp`.
+   - Verify `fakeroot-tcp` operates without SysV IPC hanging.
+3. **Turnip KGSL Hardware Acceleration Validation:**
+   - Execute `vulkaninfo --summary` inside PRoot with Turnip ICD active.
+   - Verify device name reports `Turnip Adreno (TM) 825` (or Adreno 8xx Vulkan driver) and API version >= 1.3.
+4. **Synthetic `/proc` Metrics Validation:**
+   - Execute `fastfetch` inside PRoot.
+   - Confirm OS, kernel (`6.6.0-alw-proot-aarch64`), CPU (`Snapdragon 8s Gen 4` / 8 cores), memory, and uptime render without crashes.
+5. **Interactive Hyprland + Kitty Desktop Session:**
+   - Launch session using `WorkstationService` / `SessionController` or PRoot session launcher targeting Hyprland at 3200x2136.
+   - Auto-launch `kitty` terminal in Hyprland.
+   - Capture live screenshot evidence on device (`screen_task021_hyprland_kitty.png`).
 
 ---
 
 ## 4. Dependencies & Gates
 
-- **Prerequisites:** TASK-007, TASK-010, TASK-020.
-- **Status:** Done.
-- **Evidence:** [Verification Evidence](evidence/verification.md)
+- **Prerequisites:** TASK-019, TASK-020, TASK-009, TASK-010, TASK-017
+- **Implementation Gate:** Completed.
+- **Verification Gate:** Packages installed on device, `vulkaninfo --summary` Turnip output verified, `fastfetch` output verified, Hyprland + kitty rendered at 3200x2136 on Xiaomi Pad 8 screen.
+- **Review Gate:** Complete task handoff and evidence documentation in [verification.md](evidence/verification.md). Status: **Planned**.

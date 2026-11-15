@@ -16,7 +16,8 @@ data class RuntimeDirectories(
     val fexOverlaysBaseDir: File = File(overlaysBaseDir, "fex"),
     val box64OverlaysBaseDir: File = File(overlaysBaseDir, "box64"),
     val runtimeBaseDir: File = File(filesDir, "runtime"),
-    val prootTmpDir: File = File(filesDir, "tmp")
+    val prootTmpDir: File = File(filesDir, "tmp"),
+    val fakefsBaseDir: File = File(filesDir, "fakefs")
 ) {
     val prootLibPath: String get() = File(nativeLibDir, "lib_proot.so").absolutePath
     val loaderPath: String get() = File(nativeLibDir, "lib_loader.so").absolutePath
@@ -27,6 +28,7 @@ data class RuntimeDirectories(
     fun getRootfsDir(rootfsId: String): File = File(rootfsBaseDir, rootfsId)
     fun getDriverDir(driverId: String): File = File(driversBaseDir, driverId)
     fun getTurnipDriverDir(version: String): File = File(turnipDriversBaseDir, version)
+    fun getActiveTurnipDriverDir(): File = File(turnipDriversBaseDir, "active")
     fun getOverlayDir(engine: String, version: String): File = File(File(overlaysBaseDir, engine.lowercase()), version)
     fun getActiveOverlayDir(engine: String): File = File(File(overlaysBaseDir, engine.lowercase()), "active")
     fun getRuntimeSocketDir(sessionId: String): File = File(runtimeBaseDir, sessionId)
@@ -41,5 +43,6 @@ data class RuntimeDirectories(
         if (!box64OverlaysBaseDir.exists()) box64OverlaysBaseDir.mkdirs()
         if (!runtimeBaseDir.exists()) runtimeBaseDir.mkdirs()
         if (!prootTmpDir.exists()) prootTmpDir.mkdirs()
+        if (!fakefsBaseDir.exists()) fakefsBaseDir.mkdirs()
     }
 }

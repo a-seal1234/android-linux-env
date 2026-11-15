@@ -96,12 +96,30 @@ class ProotRunnerTest {
         val guestDevPts = File(tempDir, "rootfs/archlinux-default/dev/pts")
         assertTrue("Guest /dev/pts must exist for PRoot pseudo-terminal allocation", guestDevPts.exists())
 
-        // If host /dev/pts is not writable by the test runner (as on unrooted Android), it must NOT be bound
-        val hostDevPts = File("/dev/pts")
-        if (!hostDevPts.canWrite()) {
-            val devPtsMountIndex = cmd.arguments.indexOf("/dev/pts")
-            assertEquals("Host /dev/pts must not be bound when not writable", -1, devPtsMountIndex)
-        }
+        // Host /dev/pts must NOT be bound under any circumstances to keep PRoot internal PTY intact
+        val devPtsMountIndex = cmd.arguments.indexOf("/dev/pts")
+        assertEquals("Host /dev/pts must never be bound", -1, devPtsMountIndex)
+    }
+
+    @Test
+    fun testFakeFsManagerBindsIncluded() {
+        val fakeFs = com.alw.workstation.core.proot.fakefs.FakeFsManager(dirs, hostProcChecker = { false })
+        val customRunner = ProotRunner(dirs, prootBinaryPath = "/data/app/lib/lib_proot.so", fakeFsManager = fakeFs)
+        val profile = StackProfile.defaultArchXiaomiPad8()
+        val sessionRuntimeDir = File(tempDir, "runtime/session-fakefs")
+
+        val cmd = customRunner.buildLaunchCommand(profile, sessionRuntimeDir)
+
+        assertTrue(cmd.arguments.any { it.endsWith(":/dev/shm") })
+        assertTrue(cmd.arguments.any { it.endsWith(":/tmp") })
+        assertTrue(cmd.arguments.any { it.endsWith(":/var/tmp") })
+        assertTrue(cmd.arguments.any { it.endsWith(":/run") })
+        assertTrue(cmd.arguments.any { it.endsWith(":/etc/resolv.conf") })
+        assertTrue(cmd.arguments.any { it.endsWith(":/etc/hosts") })
+        assertTrue(cmd.arguments.any { it.endsWith(":/proc/stat") })
+        assertTrue(cmd.arguments.any { it.endsWith(":/proc/uptime") })
+        assertTrue(cmd.arguments.any { it.endsWith(":/proc/loadavg") })
+        assertTrue(cmd.arguments.any { it.endsWith(":/proc/version") })
     }
 
     @Test

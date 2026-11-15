@@ -16,7 +16,9 @@ class ProotRunner(
     private val prootBinaryPath: String = dirs.prootLibPath,
     private val storageBridge: com.alw.workstation.core.proot.storage.StorageBridgeManager =
         com.alw.workstation.core.proot.storage.StorageBridgeManager(dirs),
-    private val kgslNodeChecker: (String) -> Boolean = { File(it).exists() }
+    private val kgslNodeChecker: (String) -> Boolean = { File(it).exists() },
+    private val fakeFsManager: com.alw.workstation.core.proot.fakefs.FakeFsManager =
+        com.alw.workstation.core.proot.fakefs.FakeFsManager(dirs)
 ) {
     companion object {
         private const val TAG = "ALW::ProotRunner"
@@ -72,20 +74,15 @@ class ProotRunner(
             guestDevPts.mkdirs()
         }
 
-        // Host /dev/pts is owned by root (0711) on unrooted Android and causes EACCES / out of pty
-        // devices in openpty/tcgetattr. Only bind host /dev/pts if explicitly writable by the host process.
-        val devPts = File("/dev/pts")
-        if (devPts.exists() && devPts.canWrite()) {
+        // Host /dev/pts is intentionally kept unmounted on unrooted Android so that
+        // PRoot's internal openpty/forkpty interception handles pseudo-terminals cleanly.
+
+        // Fake filesystem (host-backed writable runtime dirs, resolv.conf/hosts, synthetic proc nodes)
+        fakeFsManager.materialize()
+        for (mount in fakeFsManager.getBindMounts()) {
             args.add("-b")
-            args.add("/dev/pts")
+            args.add(mount.toCliArg())
         }
-        // Isolated guest /dev/shm backed by app private tmpfs directory to avoid host permission errors
-        val shmDir = File(dirs.prootTmpDir, "shm")
-        if (!shmDir.exists()) {
-            shmDir.mkdirs()
-        }
-        args.add("-b")
-        args.add("${shmDir.absolutePath}:/dev/shm")
 
         // 5. Direct Adreno KGSL hardware GPU device node & Fallback check
         val isKgslAccessible = kgslNodeChecker(profile.gpu.kgslNode)
@@ -120,13 +117,20 @@ class ProotRunner(
         // 7. External Mesa Turnip / Adreno driver package mount (shared driver store)
         if (profile.gpu.externalDriverId.isNotBlank() && profile.gpu.externalDriverId != "system-fallback") {
             val driverDir = dirs.getTurnipDriverDir(profile.gpu.externalDriverId).takeIf { it.exists() }
+                ?: dirs.getActiveTurnipDriverDir().takeIf { it.exists() }
                 ?: dirs.getDriverDir(profile.gpu.externalDriverId)
             if (driverDir.exists()) {
+                val resolvedDriverDir = driverDir.canonicalFile
+                val targetDir = File(rootfsDir, "opt/drivers/turnip/active")
+                if (!targetDir.exists()) targetDir.mkdirs()
+                val compatDir = File(rootfsDir, "opt/turnip")
+                if (!compatDir.exists()) compatDir.mkdirs()
+
                 args.add("-b")
-                args.add("${driverDir.absolutePath}:/opt/drivers/turnip/active:ro")
+                args.add("${resolvedDriverDir.absolutePath}:/opt/drivers/turnip/active")
                 // Backwards-compatible /opt/turnip mount
                 args.add("-b")
-                args.add("${driverDir.absolutePath}:/opt/turnip:ro")
+                args.add("${resolvedDriverDir.absolutePath}:/opt/turnip")
             }
         }
 
@@ -203,7 +207,13 @@ class ProotRunner(
 
         // 12. Command to execute (wrapped with dbus-run-session for Wayland compositors)
         val execCmd = customExecCommand ?: profile.compositor.execCommand
-        val execArgs = customArgs ?: profile.compositor.extraArgs
+        val execArgs = (customArgs ?: profile.compositor.extraArgs).toMutableList()
+
+        if ((execCmd == "Hyprland" || profile.compositor.type == StackProfile.CompositorType.HYPRLAND) &&
+            !execArgs.contains("--i-am-really-stupid")
+        ) {
+            execArgs.add("--i-am-really-stupid")
+        }
 
         // Wrap compositor sessions in dbus-run-session for clipboard & XDG portal services
         if (customExecCommand == null) {
