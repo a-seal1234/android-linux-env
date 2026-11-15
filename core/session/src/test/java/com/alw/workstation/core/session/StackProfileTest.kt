@@ -81,4 +81,25 @@ class StackProfileTest {
         assertEquals(StackProfile.CompositorType.LABWC, reconstructed.compositor.type)
         assertEquals(StackProfile.DriverMode.LLVMPIPE, reconstructed.gpu.driverMode)
     }
+
+    @Test
+    fun testEmulationConfigSerializationRoundTrip() {
+        val original = StackProfile.defaultArchXiaomiPad8().copy(
+            emulation = StackProfile.EmulationConfig(
+                enabled = true,
+                engine = StackProfile.EmulationEngine.FEX,
+                thunkLibsEnabled = true,
+                overlayVersion = "fex-2412",
+                customInterpreterPath = "/opt/fex/bin/custom"
+            )
+        )
+        val json = original.toJson()
+        val parsed = StackProfile.fromJson(json)
+
+        assertTrue(parsed.emulation.enabled)
+        assertEquals(StackProfile.EmulationEngine.FEX, parsed.emulation.engine)
+        assertTrue(parsed.emulation.thunkLibsEnabled)
+        assertEquals("fex-2412", parsed.emulation.overlayVersion)
+        assertEquals("/opt/fex/bin/custom", parsed.emulation.customInterpreterPath)
+    }
 }

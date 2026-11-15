@@ -128,10 +128,18 @@ class ProotRunnerTest {
     @Test
     fun testEmulationHooks() {
         val baseProfile = StackProfile.defaultArchXiaomiPad8()
+
+        // 1. Verify zero overhead when emulation is disabled
+        assertFalse(baseProfile.emulation.enabled)
+        val cmdDefault = runner.buildLaunchCommand(baseProfile, File(tempDir, "runtime/session-def"))
+        assertFalse(cmdDefault.arguments.contains("-q"))
+
+        // 2. Fallback when overlay directory not yet installed on host
         val fexProfile = baseProfile.copy(
             emulation = StackProfile.EmulationConfig(
                 enabled = true,
-                engine = StackProfile.EmulationEngine.FEX
+                engine = StackProfile.EmulationEngine.FEX,
+                overlayVersion = "fex-2412"
             )
         )
         val sessionRuntimeDir = File(tempDir, "runtime/session-fex")
@@ -141,6 +149,18 @@ class ProotRunnerTest {
         assertTrue(qIndex >= 0)
         assertEquals("/opt/fex/bin/FEXInterpreter", cmdFex.arguments[qIndex + 1])
 
+        // 3. Active overlay present on host
+        val overlayDir = dirs.getOverlayDir("fex", "fex-2412")
+        overlayDir.mkdirs()
+        File(overlayDir, "bin").mkdirs()
+        val cmdFexWithOverlay = runner.buildLaunchCommand(fexProfile, sessionRuntimeDir)
+        val qIndexOverlay = cmdFexWithOverlay.arguments.indexOf("-q")
+        assertTrue(qIndexOverlay >= 0)
+        assertEquals("/opt/overlays/fex/active/bin/FEXInterpreter", cmdFexWithOverlay.arguments[qIndexOverlay + 1])
+        assertTrue(cmdFexWithOverlay.arguments.contains("${overlayDir.absolutePath}:/opt/overlays/fex/active:ro"))
+        assertTrue(cmdFexWithOverlay.arguments.contains("${overlayDir.absolutePath}:/opt/fex:ro"))
+
+        // 4. BOX64 emulation
         val boxProfile = baseProfile.copy(
             emulation = StackProfile.EmulationConfig(
                 enabled = true,
@@ -151,6 +171,19 @@ class ProotRunnerTest {
         val boxQIndex = cmdBox.arguments.indexOf("-q")
         assertTrue(boxQIndex >= 0)
         assertEquals("/usr/bin/box64", cmdBox.arguments[boxQIndex + 1])
+
+        // 5. Custom interpreter path override
+        val customProfile = baseProfile.copy(
+            emulation = StackProfile.EmulationConfig(
+                enabled = true,
+                engine = StackProfile.EmulationEngine.FEX,
+                customInterpreterPath = "/custom/bin/fex"
+            )
+        )
+        val cmdCustom = runner.buildLaunchCommand(customProfile, sessionRuntimeDir)
+        val customQIndex = cmdCustom.arguments.indexOf("-q")
+        assertTrue(customQIndex >= 0)
+        assertEquals("/custom/bin/fex", cmdCustom.arguments[customQIndex + 1])
     }
 
     @Test

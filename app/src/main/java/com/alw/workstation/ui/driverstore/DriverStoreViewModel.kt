@@ -5,6 +5,9 @@ import com.alw.workstation.core.proot.driver.DriverRelease
 import com.alw.workstation.core.proot.driver.GitHubReleaseFetcher
 import com.alw.workstation.core.proot.driver.TurnipDriverManifest
 import com.alw.workstation.core.proot.driver.TurnipDriverManager
+import com.alw.workstation.core.proot.emulator.EmulatorManager
+import com.alw.workstation.core.proot.emulator.EmulatorManifest
+import com.alw.workstation.core.proot.emulator.EmulatorRelease
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,10 +19,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+enum class StoreTab {
+    GPU_DRIVERS,
+    EMULATOR_OVERLAYS
+}
+
 data class DriverStoreUiState(
     val installedDrivers: List<TurnipDriverManifest> = emptyList(),
     val onlineReleases: List<DriverRelease> = emptyList(),
     val activeDriverVersion: String? = null,
+    val installedOverlays: List<EmulatorManifest> = emptyList(),
+    val activeFexOverlayVersion: String? = null,
+    val activeBox64OverlayVersion: String? = null,
+    val onlineEmulatorReleases: List<EmulatorRelease> = emptyList(),
+    val selectedTab: StoreTab = StoreTab.GPU_DRIVERS,
     val isLoading: Boolean = false,
     val statusMessage: String? = null,
     val selectedManifest: TurnipDriverManifest? = null
@@ -28,6 +41,7 @@ data class DriverStoreUiState(
 class DriverStoreViewModel(
     private val dirs: RuntimeDirectories,
     private val driverManager: TurnipDriverManager = TurnipDriverManager(dirs),
+    private val emulatorManager: EmulatorManager = EmulatorManager(dirs),
     private val releaseFetcher: GitHubReleaseFetcher = GitHubReleaseFetcher(),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main
@@ -44,15 +58,55 @@ class DriverStoreViewModel(
         val installed = driverManager.listInstalledDrivers()
         val active = driverManager.getActiveDriver()?.version
         val curatedReleases = releaseFetcher.listAvailableReleases()
+        val overlays = emulatorManager.listInstalledOverlays()
+        val activeFex = emulatorManager.getActiveOverlay("fex")?.version
+        val activeBox64 = emulatorManager.getActiveOverlay("box64")?.version
+        val curatedEmulators = EmulatorRelease.curatedReleases()
 
         _uiState.update { current ->
             current.copy(
                 installedDrivers = installed,
                 onlineReleases = curatedReleases,
                 activeDriverVersion = active,
+                installedOverlays = overlays,
+                activeFexOverlayVersion = activeFex,
+                activeBox64OverlayVersion = activeBox64,
+                onlineEmulatorReleases = curatedEmulators,
                 isLoading = false,
                 statusMessage = null
             )
+        }
+    }
+
+    fun selectTab(tab: StoreTab) {
+        _uiState.update { it.copy(selectedTab = tab) }
+    }
+
+    fun activateOverlay(engine: String, version: String) {
+        try {
+            emulatorManager.activateOverlay(engine, version)
+            _uiState.update {
+                if (engine.lowercase() == "fex") {
+                    it.copy(activeFexOverlayVersion = version, statusMessage = "Activated FEX overlay: $version")
+                } else {
+                    it.copy(activeBox64OverlayVersion = version, statusMessage = "Activated box64 overlay: $version")
+                }
+            }
+            refresh()
+        } catch (e: Exception) {
+            _uiState.update { it.copy(statusMessage = "Failed activating overlay: ${e.message}") }
+        }
+    }
+
+    fun deleteOverlay(engine: String, version: String) {
+        try {
+            val deleted = emulatorManager.deleteOverlay(engine, version)
+            if (deleted) {
+                _uiState.update { it.copy(statusMessage = "Deleted overlay: $version") }
+                refresh()
+            }
+        } catch (e: Exception) {
+            _uiState.update { it.copy(statusMessage = "Failed deleting overlay: ${e.message}") }
         }
     }
 

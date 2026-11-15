@@ -76,4 +76,52 @@ class EnvironmentGeneratorTest {
         assertNull(env["VK_ICD_FILENAMES"])
         assertNull(env["VK_DRIVER_FILES"])
     }
+
+    @Test
+    fun testFexEmulationEnvironment() {
+        val profile = StackProfile.defaultArchXiaomiPad8().copy(
+            emulation = StackProfile.EmulationConfig(
+                enabled = true,
+                engine = StackProfile.EmulationEngine.FEX,
+                thunkLibsEnabled = true
+            )
+        )
+        val env = EnvironmentGenerator.generateEnvironment(profile, File("/tmp/runtime-fex"))
+
+        assertEquals("/opt/overlays/fex/active/thunks/host", env["FEX_THUNKHOSTPATH"])
+        assertEquals("/opt/overlays/fex/active/thunks/guest", env["FEX_THUNKGUESTPATH"])
+        assertEquals("/opt/overlays/fex/active/rootfs", env["FEX_ROOTFS"])
+    }
+
+    @Test
+    fun testFexEmulationWithoutThunks() {
+        val profile = StackProfile.defaultArchXiaomiPad8().copy(
+            emulation = StackProfile.EmulationConfig(
+                enabled = true,
+                engine = StackProfile.EmulationEngine.FEX,
+                thunkLibsEnabled = false
+            )
+        )
+        val env = EnvironmentGenerator.generateEnvironment(profile, File("/tmp/runtime-fex-nothunk"))
+
+        assertNull(env["FEX_THUNKHOSTPATH"])
+        assertNull(env["FEX_THUNKGUESTPATH"])
+        assertNull(env["FEX_ROOTFS"])
+    }
+
+    @Test
+    fun testBox64EmulationEnvironment() {
+        val profile = StackProfile.defaultArchXiaomiPad8().copy(
+            emulation = StackProfile.EmulationConfig(
+                enabled = true,
+                engine = StackProfile.EmulationEngine.BOX64
+            )
+        )
+        val env = EnvironmentGenerator.generateEnvironment(profile, File("/tmp/runtime-box"))
+
+        assertEquals("/opt/overlays/box64/active/lib:/opt/drivers/turnip/active/lib", env["BOX64_LD_LIBRARY_PATH"])
+        assertEquals("/opt/overlays/box64/active/bin", env["BOX64_PATH"])
+        assertEquals("1", env["BOX64_LOG"])
+        assertEquals("1", env["BOX64_NOBANNER"])
+    }
 }

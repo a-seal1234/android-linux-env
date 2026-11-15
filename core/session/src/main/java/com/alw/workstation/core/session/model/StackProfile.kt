@@ -110,12 +110,25 @@ data class StackProfile(
     data class EmulationConfig(
         val enabled: Boolean = false,
         val engine: EmulationEngine = EmulationEngine.FEX,
-        val thunkLibsEnabled: Boolean = true
+        val thunkLibsEnabled: Boolean = true,
+        val overlayVersion: String = "fex-2412",
+        val customInterpreterPath: String? = null
     )
 
     enum class EmulationEngine {
         FEX,
-        BOX64
+        BOX64;
+
+        companion object {
+            fun fromString(value: String?): EmulationEngine {
+                if (value == null) return FEX
+                return when (value.trim().uppercase()) {
+                    "BOX64" -> BOX64
+                    "FEX", "FEX_EMU", "FEX-EMU", "FEXINTERPRETER" -> FEX
+                    else -> FEX
+                }
+            }
+        }
     }
 
     fun toJson(): JSONObject {
@@ -172,6 +185,10 @@ data class StackProfile(
                 put("enabled", emulation.enabled)
                 put("engine", emulation.engine.name.lowercase())
                 put("thunkLibsEnabled", emulation.thunkLibsEnabled)
+                put("overlayVersion", emulation.overlayVersion)
+                if (emulation.customInterpreterPath != null) {
+                    put("customInterpreterPath", emulation.customInterpreterPath)
+                }
             })
         }
     }
@@ -267,8 +284,10 @@ data class StackProfile(
                 ),
                 emulation = EmulationConfig(
                     enabled = emuObj?.optBoolean("enabled", false) ?: false,
-                    engine = EmulationEngine.valueOf(emuObj?.optString("engine", "FEX")?.uppercase() ?: "FEX"),
-                    thunkLibsEnabled = emuObj?.optBoolean("thunkLibsEnabled", true) ?: true
+                    engine = EmulationEngine.fromString(emuObj?.optString("engine")),
+                    thunkLibsEnabled = emuObj?.optBoolean("thunkLibsEnabled", true) ?: true,
+                    overlayVersion = emuObj?.optString("overlayVersion", "fex-2412") ?: "fex-2412",
+                    customInterpreterPath = emuObj?.optString("customInterpreterPath")?.takeIf { it.isNotBlank() }
                 )
             )
         }

@@ -12,6 +12,9 @@ data class RuntimeDirectories(
     val rootfsBaseDir: File = File(filesDir, "rootfs"),
     val driversBaseDir: File = File(filesDir, "drivers"),
     val turnipDriversBaseDir: File = File(driversBaseDir, "turnip"),
+    val overlaysBaseDir: File = File(filesDir, "overlays"),
+    val fexOverlaysBaseDir: File = File(overlaysBaseDir, "fex"),
+    val box64OverlaysBaseDir: File = File(overlaysBaseDir, "box64"),
     val runtimeBaseDir: File = File(filesDir, "runtime"),
     val prootTmpDir: File = File(filesDir, "tmp")
 ) {
@@ -24,6 +27,8 @@ data class RuntimeDirectories(
     fun getRootfsDir(rootfsId: String): File = File(rootfsBaseDir, rootfsId)
     fun getDriverDir(driverId: String): File = File(driversBaseDir, driverId)
     fun getTurnipDriverDir(version: String): File = File(turnipDriversBaseDir, version)
+    fun getOverlayDir(engine: String, version: String): File = File(File(overlaysBaseDir, engine.lowercase()), version)
+    fun getActiveOverlayDir(engine: String): File = File(File(overlaysBaseDir, engine.lowercase()), "active")
     fun getRuntimeSocketDir(sessionId: String): File = File(runtimeBaseDir, sessionId)
 
     fun ensureDirectoriesExist() {
@@ -31,6 +36,9 @@ data class RuntimeDirectories(
         if (!rootfsBaseDir.exists()) rootfsBaseDir.mkdirs()
         if (!driversBaseDir.exists()) driversBaseDir.mkdirs()
         if (!turnipDriversBaseDir.exists()) turnipDriversBaseDir.mkdirs()
+        if (!overlaysBaseDir.exists()) overlaysBaseDir.mkdirs()
+        if (!fexOverlaysBaseDir.exists()) fexOverlaysBaseDir.mkdirs()
+        if (!box64OverlaysBaseDir.exists()) box64OverlaysBaseDir.mkdirs()
         if (!runtimeBaseDir.exists()) runtimeBaseDir.mkdirs()
         if (!prootTmpDir.exists()) prootTmpDir.mkdirs()
     }

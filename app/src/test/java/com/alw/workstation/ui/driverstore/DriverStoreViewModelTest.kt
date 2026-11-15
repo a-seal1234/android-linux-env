@@ -4,6 +4,8 @@ import com.alw.workstation.core.proot.RuntimeDirectories
 import com.alw.workstation.core.proot.driver.GitHubReleaseFetcher
 import com.alw.workstation.core.proot.driver.TurnipDriverManifest
 import com.alw.workstation.core.proot.driver.TurnipDriverManager
+import com.alw.workstation.core.proot.emulator.EmulatorManifest
+import com.alw.workstation.core.proot.emulator.EmulatorManager
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -101,5 +103,49 @@ class DriverStoreViewModelTest {
         viewModel.deleteDriver(version)
         assertTrue(viewModel.uiState.value.installedDrivers.isEmpty())
         assertEquals(null, driverManager.getInstalledDriver(version))
+    }
+
+    @Test
+    fun testEmulatorOverlaysTabAndActivation() {
+        val emuManager = EmulatorManager(dirs)
+
+        // 1. Initial curated releases
+        val state = viewModel.uiState.value
+        assertTrue(state.onlineEmulatorReleases.isNotEmpty())
+        val fexRelease = state.onlineEmulatorReleases.find { it.engine == "fex" }
+        assertNotNull(fexRelease)
+        assertEquals("fex-2412", fexRelease?.version)
+
+        // 2. Tab switching
+        assertEquals(StoreTab.GPU_DRIVERS, viewModel.uiState.value.selectedTab)
+        viewModel.selectTab(StoreTab.EMULATOR_OVERLAYS)
+        assertEquals(StoreTab.EMULATOR_OVERLAYS, viewModel.uiState.value.selectedTab)
+
+        // 3. Setup mock installed overlay
+        val fexDir = dirs.getOverlayDir("fex", "fex-2412")
+        fexDir.mkdirs()
+        File(fexDir, "bin").mkdirs()
+        val manifest = EmulatorManifest(
+            engine = "fex",
+            version = "fex-2412",
+            displayName = "FEX v2412 Test",
+            interpreterRelativePath = "bin/FEXInterpreter",
+            sha256Checksum = "mock-sha",
+            hasThunkLibs = true
+        )
+        File(fexDir, "manifest.json").writeText(manifest.toJson())
+
+        viewModel.refresh()
+        assertEquals(1, viewModel.uiState.value.installedOverlays.size)
+
+        // 4. Activate overlay
+        viewModel.activateOverlay("fex", "fex-2412")
+        assertEquals("fex-2412", viewModel.uiState.value.activeFexOverlayVersion)
+        assertEquals("fex-2412", emuManager.getActiveOverlay("fex")?.version)
+
+        // 5. Delete overlay
+        viewModel.deleteOverlay("fex", "fex-2412")
+        assertTrue(viewModel.uiState.value.installedOverlays.isEmpty())
+        assertNull(emuManager.getActiveOverlay("fex"))
     }
 }

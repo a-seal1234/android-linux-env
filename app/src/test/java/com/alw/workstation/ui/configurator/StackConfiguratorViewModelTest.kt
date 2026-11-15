@@ -168,4 +168,36 @@ class StackConfiguratorViewModelTest {
         assertFalse(cannotDeleteLast)
         assertNotNull(profileRepository.getProfile(defaultProfile.id))
     }
+
+    @Test
+    fun testUpdateEmulationConfig() {
+        viewModel.loadProfile(defaultProfile.id)
+        assertFalse(viewModel.uiState.value.profile.emulation.enabled)
+
+        viewModel.updateEmulationEnabled(true)
+        assertTrue(viewModel.uiState.value.profile.emulation.enabled)
+
+        viewModel.updateEmulationEngine(StackProfile.EmulationEngine.BOX64)
+        assertEquals(StackProfile.EmulationEngine.BOX64, viewModel.uiState.value.profile.emulation.engine)
+
+        viewModel.updateEmulationThunkLibs(false)
+        assertFalse(viewModel.uiState.value.profile.emulation.thunkLibsEnabled)
+
+        viewModel.updateEmulationOverlayVersion("box64-custom")
+        assertEquals("box64-custom", viewModel.uiState.value.profile.emulation.overlayVersion)
+
+        viewModel.updateCustomInterpreterPath("/usr/bin/custom")
+        assertEquals("/usr/bin/custom", viewModel.uiState.value.profile.emulation.customInterpreterPath)
+
+        val saved = viewModel.saveProfile()
+        assertTrue(saved)
+
+        val stored = profileRepository.getProfile(defaultProfile.id)
+        assertNotNull(stored)
+        assertTrue(stored!!.emulation.enabled)
+        assertEquals(StackProfile.EmulationEngine.BOX64, stored.emulation.engine)
+        assertFalse(stored.emulation.thunkLibsEnabled)
+        assertEquals("box64-custom", stored.emulation.overlayVersion)
+        assertEquals("/usr/bin/custom", stored.emulation.customInterpreterPath)
+    }
 }

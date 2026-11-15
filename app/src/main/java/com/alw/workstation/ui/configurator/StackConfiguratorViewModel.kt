@@ -3,6 +3,8 @@ package com.alw.workstation.ui.configurator
 import com.alw.workstation.core.proot.RootfsManager
 import com.alw.workstation.core.proot.RuntimeDirectories
 import com.alw.workstation.core.proot.driver.TurnipDriverManager
+import com.alw.workstation.core.proot.emulator.EmulatorManager
+import com.alw.workstation.core.proot.emulator.EmulatorManifest
 import com.alw.workstation.core.session.ProfileRepository
 import com.alw.workstation.core.session.ProfileValidator
 import com.alw.workstation.core.session.model.StackProfile
@@ -16,6 +18,7 @@ data class StackConfiguratorUiState(
     val isNewProfile: Boolean = false,
     val availableRootfs: List<RootfsManager.RootfsInfo> = emptyList(),
     val availableDrivers: List<String> = emptyList(),
+    val availableOverlays: List<EmulatorManifest> = emptyList(),
     val validationErrors: List<String> = emptyList(),
     val isSaved: Boolean = false,
     val message: String? = null
@@ -25,7 +28,8 @@ class StackConfiguratorViewModel(
     private val dirs: RuntimeDirectories,
     private val profileRepository: ProfileRepository = ProfileRepository(dirs.filesDir),
     private val rootfsManager: RootfsManager = RootfsManager(dirs),
-    private val driverManager: TurnipDriverManager = TurnipDriverManager(dirs)
+    private val driverManager: TurnipDriverManager = TurnipDriverManager(dirs),
+    private val emulatorManager: EmulatorManager = EmulatorManager(dirs)
 ) {
 
     private val _uiState = MutableStateFlow(StackConfiguratorUiState())
@@ -39,11 +43,13 @@ class StackConfiguratorViewModel(
         val rootfsList = rootfsManager.listRootfs()
         val installedDrivers = driverManager.listInstalledDrivers()
         val driverNames = installedDrivers.map { it.version } + listOf("active", "system-fallback")
+        val installedOverlays = emulatorManager.listInstalledOverlays()
 
         _uiState.update { current ->
             current.copy(
                 availableRootfs = rootfsList,
-                availableDrivers = driverNames.distinct()
+                availableDrivers = driverNames.distinct(),
+                availableOverlays = installedOverlays
             )
         }
     }
@@ -183,6 +189,47 @@ class StackConfiguratorViewModel(
             env.remove(key)
             val updatedGpu = current.profile.gpu.copy(environmentOverrides = env)
             current.copy(profile = current.profile.copy(gpu = updatedGpu))
+        }
+    }
+
+    fun updateEmulationEnabled(enabled: Boolean) {
+        _uiState.update { current ->
+            val updated = current.profile.emulation.copy(enabled = enabled)
+            current.copy(profile = current.profile.copy(emulation = updated))
+        }
+    }
+
+    fun updateEmulationEngine(engine: StackProfile.EmulationEngine) {
+        _uiState.update { current ->
+            val defaultOverlay = if (engine == StackProfile.EmulationEngine.FEX) "fex-2412" else "box64-v0.3.2"
+            val updated = current.profile.emulation.copy(
+                engine = engine,
+                overlayVersion = defaultOverlay
+            )
+            current.copy(profile = current.profile.copy(emulation = updated))
+        }
+    }
+
+    fun updateEmulationThunkLibs(enabled: Boolean) {
+        _uiState.update { current ->
+            val updated = current.profile.emulation.copy(thunkLibsEnabled = enabled)
+            current.copy(profile = current.profile.copy(emulation = updated))
+        }
+    }
+
+    fun updateEmulationOverlayVersion(version: String) {
+        _uiState.update { current ->
+            val updated = current.profile.emulation.copy(overlayVersion = version)
+            current.copy(profile = current.profile.copy(emulation = updated))
+        }
+    }
+
+    fun updateCustomInterpreterPath(path: String?) {
+        _uiState.update { current ->
+            val updated = current.profile.emulation.copy(
+                customInterpreterPath = path?.takeIf { it.isNotBlank() }
+            )
+            current.copy(profile = current.profile.copy(emulation = updated))
         }
     }
 

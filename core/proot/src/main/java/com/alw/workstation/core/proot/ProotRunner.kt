@@ -130,12 +130,36 @@ class ProotRunner(
             args.add(mount.toCliArg())
         }
 
-        // 9. Optional x86_64 emulation hook
+        // 9. Optional x86_64 emulation hook & shared overlay bind-mount
         if (profile.emulation.enabled) {
-            val emulatorPath = when (profile.emulation.engine) {
-                StackProfile.EmulationEngine.FEX -> "/opt/fex/bin/FEXInterpreter"
-                StackProfile.EmulationEngine.BOX64 -> "/usr/bin/box64"
+            val engineName = profile.emulation.engine.name.lowercase()
+            val overlayDir = dirs.getOverlayDir(engineName, profile.emulation.overlayVersion).takeIf { it.exists() }
+                ?: dirs.getActiveOverlayDir(engineName).takeIf { it.exists() }
+            if (overlayDir != null && overlayDir.exists()) {
+                args.add("-b")
+                args.add("${overlayDir.absolutePath}:/opt/overlays/$engineName/active:ro")
+                // Legacy / fallback mount for /opt/fex or /opt/box64
+                args.add("-b")
+                args.add("${overlayDir.absolutePath}:/opt/$engineName:ro")
             }
+
+            val emulatorPath = profile.emulation.customInterpreterPath
+                ?: when (profile.emulation.engine) {
+                    StackProfile.EmulationEngine.FEX -> {
+                        if (overlayDir != null && overlayDir.exists()) {
+                            "/opt/overlays/fex/active/bin/FEXInterpreter"
+                        } else {
+                            "/opt/fex/bin/FEXInterpreter"
+                        }
+                    }
+                    StackProfile.EmulationEngine.BOX64 -> {
+                        if (overlayDir != null && overlayDir.exists()) {
+                            "/opt/overlays/box64/active/bin/box64"
+                        } else {
+                            "/usr/bin/box64"
+                        }
+                    }
+                }
             args.add("-q")
             args.add(emulatorPath)
         }

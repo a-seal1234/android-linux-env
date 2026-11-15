@@ -468,8 +468,100 @@ fun StackConfiguratorScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Section 7: Custom Environment Variables
-                ConfigSectionCard(title = "7. Custom Environment Variables") {
+                // Section 7: x86_64 Translation Hook (-q)
+                ConfigSectionCard(title = "7. x86_64 Translation Hook (-q)") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                            Text(
+                                text = "Enable x86_64 Translation",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Transparently executes x86_64 ELFs via PRoot -q. Zero overhead when executing native aarch64 binaries.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = state.profile.emulation.enabled,
+                            onCheckedChange = { viewModel.updateEmulationEnabled(it) }
+                        )
+                    }
+
+                    if (state.profile.emulation.enabled) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Translation Engine",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            SelectableCard(
+                                title = "FEX-Emu (Recommended)",
+                                subtitle = "Fast JIT translation with Turnip Vulkan/GL thunking.",
+                                selected = state.profile.emulation.engine == StackProfile.EmulationEngine.FEX,
+                                onClick = { viewModel.updateEmulationEngine(StackProfile.EmulationEngine.FEX) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            SelectableCard(
+                                title = "box64",
+                                subtitle = "ARM64 Dynarec for Linux x86_64 binaries.",
+                                selected = state.profile.emulation.engine == StackProfile.EmulationEngine.BOX64,
+                                onClick = { viewModel.updateEmulationEngine(StackProfile.EmulationEngine.BOX64) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        if (state.profile.emulation.engine == StackProfile.EmulationEngine.FEX) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text(
+                                        text = "Vulkan & GL Hardware Thunking",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Route guest x86_64 Vulkan/OpenGL calls into host Turnip Adreno 825 driver (/opt/drivers/turnip).",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = state.profile.emulation.thunkLibsEnabled,
+                                    onCheckedChange = { viewModel.updateEmulationThunkLibs(it) }
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = state.profile.emulation.overlayVersion,
+                            onValueChange = { viewModel.updateEmulationOverlayVersion(it) },
+                            label = { Text("Overlay Version") },
+                            modifier = Modifier.fillMaxWidth(),
+                            supportingText = { Text("Active overlay directory in files/overlays/") }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Section 8: Custom Environment Variables
+                ConfigSectionCard(title = "8. Custom Environment Variables") {
                     Text(
                         text = "Active Environment Variables (${state.profile.gpu.environmentOverrides.size})",
                         style = MaterialTheme.typography.bodyMedium,

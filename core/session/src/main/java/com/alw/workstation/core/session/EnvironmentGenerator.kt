@@ -100,7 +100,26 @@ object EnvironmentGenerator {
         env["PULSE_SERVER"] = "unix:/run/user/1000/pulse/native unix:/tmp/runtime-alw/pulse/native"
         env["PIPEWIRE_RUNTIME_DIR"] = "/tmp/runtime-alw"
 
-        // 7. User and profile environment overrides
+        // 7. x86_64 Emulation & GPU Thunking environment (FEX-Emu / box64)
+        if (profile.emulation.enabled) {
+            when (profile.emulation.engine) {
+                StackProfile.EmulationEngine.FEX -> {
+                    if (profile.emulation.thunkLibsEnabled) {
+                        env["FEX_THUNKHOSTPATH"] = "/opt/overlays/fex/active/thunks/host"
+                        env["FEX_THUNKGUESTPATH"] = "/opt/overlays/fex/active/thunks/guest"
+                        env["FEX_ROOTFS"] = "/opt/overlays/fex/active/rootfs"
+                    }
+                }
+                StackProfile.EmulationEngine.BOX64 -> {
+                    env["BOX64_LD_LIBRARY_PATH"] = "/opt/overlays/box64/active/lib:/opt/drivers/turnip/active/lib"
+                    env["BOX64_PATH"] = "/opt/overlays/box64/active/bin"
+                    env["BOX64_LOG"] = "1"
+                    env["BOX64_NOBANNER"] = "1"
+                }
+            }
+        }
+
+        // 8. User and profile environment overrides
         env.putAll(profile.gpu.environmentOverrides)
 
         return env
