@@ -5,6 +5,7 @@ import android.view.MotionEvent
 import com.alw.workstation.bridge.wayland.input.DefaultMotionEventStylusProvider
 import com.alw.workstation.bridge.wayland.input.InputProfile
 import com.alw.workstation.bridge.wayland.input.StylusDataProvider
+import com.alw.workstation.bridge.wayland.input.XiaomiPenStylusProvider
 
 /**
  * Normalizes Android hardware input to Linux Wayland protocols.

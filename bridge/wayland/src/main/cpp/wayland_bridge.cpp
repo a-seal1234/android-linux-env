@@ -530,6 +530,33 @@ public:
         }
 
         ANativeWindow_unlockAndPost(m_nativeWindow);
+
+        auto now = std::chrono::steady_clock::now();
+        std::chrono::duration<double, std::milli> frameDelta = now - m_lastFrameTime;
+        m_lastFrameTime = now;
+        double frameMs = frameDelta.count();
+
+        m_frameCount++;
+        m_pacingFrameCount++;
+        m_totalFrameTimeMs += frameMs;
+        if (frameMs < m_minFrameTimeMs) m_minFrameTimeMs = frameMs;
+        if (frameMs > m_maxFrameTimeMs) m_maxFrameTimeMs = frameMs;
+
+        std::chrono::duration<double, std::milli> logDelta = now - m_lastPacingLogTime;
+        if (logDelta.count() >= 1000.0 && m_pacingFrameCount > 0) {
+            double elapsedSec = logDelta.count() / 1000.0;
+            double fps = static_cast<double>(m_pacingFrameCount) / elapsedSec;
+            double avgFrameMs = m_totalFrameTimeMs / m_pacingFrameCount;
+            LOGI("144Hz Frame Pacing: %llu frames (total %llu) in %.1f ms | FPS: %.1f | Frame Time: avg=%.2f ms, min=%.2f ms, max=%.2f ms",
+                 static_cast<unsigned long long>(m_pacingFrameCount),
+                 static_cast<unsigned long long>(m_frameCount),
+                 logDelta.count(), fps, avgFrameMs, m_minFrameTimeMs, m_maxFrameTimeMs);
+            m_pacingFrameCount = 0;
+            m_totalFrameTimeMs = 0.0;
+            m_minFrameTimeMs = 9999.0;
+            m_maxFrameTimeMs = 0.0;
+            m_lastPacingLogTime = now;
+        }
     }
 
     // --- Tablet-v2 Stylus Dispatchers ---
@@ -1267,6 +1294,15 @@ private:
     int m_width;
     int m_height;
     float m_scale;
+
+    // 144Hz Frame pacing telemetry
+    uint64_t m_frameCount{0};
+    uint64_t m_pacingFrameCount{0};
+    std::chrono::steady_clock::time_point m_lastPacingLogTime{std::chrono::steady_clock::now()};
+    std::chrono::steady_clock::time_point m_lastFrameTime{std::chrono::steady_clock::now()};
+    double m_totalFrameTimeMs{0.0};
+    double m_minFrameTimeMs{9999.0};
+    double m_maxFrameTimeMs{0.0};
 
     std::unordered_map<int, WaylandClient> m_clients;
     std::atomic<int> m_activeClients;

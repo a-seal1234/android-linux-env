@@ -66,9 +66,16 @@ class ProotRunner(
             args.add(mount.toCliArg())
         }
 
-        // Additional pseudo filesystems if present on host
+        // Ensure guest rootfs /dev/pts exists for internal PTY allocation
+        val guestDevPts = File(rootfsDir, "dev/pts")
+        if (!guestDevPts.exists()) {
+            guestDevPts.mkdirs()
+        }
+
+        // Host /dev/pts is owned by root (0711) on unrooted Android and causes EACCES / out of pty
+        // devices in openpty/tcgetattr. Only bind host /dev/pts if explicitly writable by the host process.
         val devPts = File("/dev/pts")
-        if (devPts.exists()) {
+        if (devPts.exists() && devPts.canWrite()) {
             args.add("-b")
             args.add("/dev/pts")
         }

@@ -352,7 +352,7 @@ data class StackProfile(
                     execCommand = "labwc",
                     configMode = ConfigMode.SAFE_MODE,
                     sessionConfigPath = "/tmp/android-safe-mode.conf",
-                    extraArgs = listOf("-s", "weston-terminal")
+                    extraArgs = emptyList()
                 ),
                 gpu = GpuConfig(
                     driverMode = DriverMode.LLVMPIPE,
@@ -360,8 +360,11 @@ data class StackProfile(
                     mesaLoaderOverride = "llvmpipe"
                 ),
                 display = DisplayConfig(
-                    scaleFactor = 1.5f,
-                    refreshRateHz = 60
+                    resolutionMode = ResolutionMode.NATIVE,
+                    customWidth = 3200,
+                    customHeight = 2136,
+                    scaleFactor = 1.75f,
+                    refreshRateHz = 144
                 ),
                 storage = StorageConfig(
                     bindSdcard = false

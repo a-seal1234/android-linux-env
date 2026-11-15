@@ -8,7 +8,9 @@ import android.view.MotionEvent
 import android.view.PointerIcon
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import com.alw.workstation.bridge.wayland.input.DefaultMotionEventStylusProvider
 import com.alw.workstation.bridge.wayland.input.InputProfile
+import com.alw.workstation.bridge.wayland.input.XiaomiPenStylusProvider
 
 /**
  * SurfaceView hosting the embedded Wayland display surface.
@@ -25,6 +27,7 @@ class WaylandSurfaceView @JvmOverloads constructor(
         set(value) {
             field = value
             value?.inputProfile = inputProfile
+            applyInputProfile(inputProfile)
         }
 
     var inputProfile: InputProfile = InputProfile.CREATIVE_PEN
@@ -48,9 +51,11 @@ class WaylandSurfaceView @JvmOverloads constructor(
             InputProfile.CREATIVE_PEN -> {
                 // Suppress Android system hover circle cursor so creative apps (Krita/Blender) draw their own cursor
                 pointerIcon = PointerIcon.getSystemIcon(context, PointerIcon.TYPE_NULL)
+                inputDispatcher?.stylusProvider = XiaomiPenStylusProvider()
             }
             InputProfile.GAMING_RAW -> {
                 pointerIcon = PointerIcon.getSystemIcon(context, PointerIcon.TYPE_ARROW)
+                inputDispatcher?.stylusProvider = DefaultMotionEventStylusProvider()
                 if (hasWindowFocus()) {
                     requestPointerCapture()
                 }
@@ -66,6 +71,9 @@ class WaylandSurfaceView @JvmOverloads constructor(
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            holder.surface.setFrameRate(144.0f, android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+        }
         serverManager?.attachSurface(holder.surface)
         if (hasWindowFocus()) {
             applyInputProfile(inputProfile)
@@ -73,6 +81,9 @@ class WaylandSurfaceView @JvmOverloads constructor(
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            holder.surface.setFrameRate(144.0f, android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+        }
         serverManager?.resizeSurface(width, height)
         serverManager?.attachSurface(holder.surface)
     }

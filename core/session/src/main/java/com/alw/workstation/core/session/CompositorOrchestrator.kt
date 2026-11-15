@@ -85,7 +85,10 @@ class CompositorOrchestrator(
                 )
             )
 
-            // Prepare Safe Mode session artifacts
+            // Prepare Safe Mode session artifacts & configs
+            if (rootfsDir != null) {
+                ConfigSynthesizer.ensureDefaultConfigsExist(rootfsDir, safeProfile.distro.defaultUser, safeProfile)
+            }
             sessionController.prepareSession(safeProfile)
             sessionController.updateState(SessionState.Running(safeProfile, 0L))
 

@@ -82,8 +82,26 @@ class ProotRunnerTest {
 
         assertTrue(cmd.arguments.contains("dbus-run-session"))
         assertTrue(cmd.arguments.contains("labwc"))
-        assertTrue(cmd.arguments.contains("-s"))
-        assertTrue(cmd.arguments.contains("weston-terminal"))
+        assertFalse(cmd.arguments.contains("-s"))
+    }
+
+    @Test
+    fun testPtyIsolationEnsuresGuestDevPtsWithoutHostBind() {
+        val profile = StackProfile.defaultArchXiaomiPad8()
+        val sessionRuntimeDir = File(tempDir, "runtime/session-pty")
+
+        val cmd = runner.buildLaunchCommand(profile, sessionRuntimeDir)
+
+        // Verifies guest rootfs /dev/pts directory is created
+        val guestDevPts = File(tempDir, "rootfs/archlinux-default/dev/pts")
+        assertTrue("Guest /dev/pts must exist for PRoot pseudo-terminal allocation", guestDevPts.exists())
+
+        // If host /dev/pts is not writable by the test runner (as on unrooted Android), it must NOT be bound
+        val hostDevPts = File("/dev/pts")
+        if (!hostDevPts.canWrite()) {
+            val devPtsMountIndex = cmd.arguments.indexOf("/dev/pts")
+            assertEquals("Host /dev/pts must not be bound when not writable", -1, devPtsMountIndex)
+        }
     }
 
     @Test

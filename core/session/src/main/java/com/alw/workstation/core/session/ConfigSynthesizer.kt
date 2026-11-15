@@ -150,6 +150,12 @@ object ConfigSynthesizer {
         return buildString {
             appendLine("<?xml version=\"1.0\"?>")
             appendLine("<labwc_config>")
+            appendLine("  <theme>")
+            appendLine("    <name>Openbox</name>")
+            appendLine("    <titlebar>")
+            appendLine("      <layout>NL:IMC</layout>")
+            appendLine("    </titlebar>")
+            appendLine("  </theme>")
             appendLine("  <core>")
             appendLine("    <decoration>server</decoration>")
             appendLine("    <gap>4</gap>")
@@ -158,7 +164,8 @@ object ConfigSynthesizer {
             appendLine("    <windowRule identifier=\"*\" serverDecoration=\"yes\" />")
             appendLine("  </windowRules>")
             appendLine("  <keyboard>")
-            appendLine("    <keybind key=\"W-Return\"><action name=\"Execute\" command=\"weston-terminal\" /></keybind>")
+            appendLine("    <keybind key=\"W-Return\"><action name=\"Execute\" command=\"weston-terminal --shell=/usr/bin/bash\" /></keybind>")
+            appendLine("    <keybind key=\"A-Return\"><action name=\"Execute\" command=\"kitty\" /></keybind>")
             appendLine("    <keybind key=\"W-q\"><action name=\"Close\" /></keybind>")
             appendLine("    <keybind key=\"W-m\"><action name=\"Exit\" /></keybind>")
             appendLine("  </keyboard>")
@@ -176,9 +183,15 @@ object ConfigSynthesizer {
         return buildString {
             appendLine("#!/bin/sh")
             appendLine("# LabWC Safe Mode autostart")
-            appendLine("pipewire &")
-            appendLine("wireplumber &")
-            appendLine("weston-terminal &")
+            appendLine("which pipewire >/dev/null 2>&1 && pipewire &")
+            appendLine("which wireplumber >/dev/null 2>&1 && wireplumber &")
+            appendLine("if which weston-terminal >/dev/null 2>&1; then")
+            appendLine("    weston-terminal --shell=/usr/bin/bash &")
+            appendLine("elif which kitty >/dev/null 2>&1; then")
+            appendLine("    kitty &")
+            appendLine("elif which foot >/dev/null 2>&1; then")
+            appendLine("    foot &")
+            appendLine("fi")
         }
     }
 

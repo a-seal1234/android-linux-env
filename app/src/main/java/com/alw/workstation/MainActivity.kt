@@ -175,12 +175,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun setSessionRefreshRate(rateHz: Float) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            val params = window.attributes
+            params.preferredRefreshRate = rateHz
+            window.attributes = params
+        }
+    }
+
     private fun startWorkstationService() {
+        setSessionRefreshRate(144.0f)
         val intent = Intent(this, WorkstationService::class.java)
         startForegroundService(intent)
     }
 
     private fun stopWorkstationService() {
+        setSessionRefreshRate(0.0f)
         val intent = Intent(this, WorkstationService::class.java)
         stopService(intent)
     }

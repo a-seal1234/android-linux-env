@@ -101,7 +101,7 @@ interface StylusDataProvider {
 /**
  * Default implementation extracting high-precision stylus parameters from standard Android MotionEvents.
  */
-class DefaultMotionEventStylusProvider : StylusDataProvider {
+open class DefaultMotionEventStylusProvider : StylusDataProvider {
 
     override fun parseMotionEvent(
         event: MotionEvent,
