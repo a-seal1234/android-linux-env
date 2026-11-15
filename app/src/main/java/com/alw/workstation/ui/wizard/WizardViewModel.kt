@@ -1,5 +1,6 @@
 package com.alw.workstation.ui.wizard
 
+import com.alw.workstation.core.proot.ProotRunner
 import com.alw.workstation.core.proot.RootfsDownloader
 import com.alw.workstation.core.proot.RootfsExtractor
 import com.alw.workstation.core.proot.RootfsManager
@@ -9,6 +10,9 @@ import com.alw.workstation.core.proot.driver.ElfAbiType
 import com.alw.workstation.core.proot.driver.ElfAbiValidator
 import com.alw.workstation.core.proot.driver.GitHubReleaseFetcher
 import com.alw.workstation.core.proot.driver.TurnipDriverManager
+import com.alw.workstation.core.proot.oci.OciDistroCatalog
+import com.alw.workstation.core.proot.oci.OciPullManager
+import com.alw.workstation.core.proot.oci.OciRegistryClient
 import com.alw.workstation.core.proot.provisioning.ArchProvisioner
 import com.alw.workstation.core.proot.provisioning.ProvisioningConfig
 import com.alw.workstation.core.session.ProfileRepository
@@ -34,6 +38,8 @@ class WizardViewModel(
     private val rootfsDownloader: RootfsDownloader = RootfsDownloader(dirs),
     private val driverManager: TurnipDriverManager = TurnipDriverManager(dirs),
     private val releaseFetcher: GitHubReleaseFetcher = GitHubReleaseFetcher(),
+    private val ociRegistryClient: OciRegistryClient = OciRegistryClient(),
+    private val ociPullManager: OciPullManager? = null,
     private val provisioner: ArchProvisioner? = null,
     private val profileRepository: ProfileRepository? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -114,6 +120,51 @@ class WizardViewModel(
                     it.driverVerificationState
                 }
             )
+        }
+    }
+
+    fun selectRootfsSource(source: RootfsSourceType) {
+        _uiState.update { it.copy(rootfsSource = source) }
+    }
+
+    fun selectOciDistro(distroId: String) {
+        val entry = OciDistroCatalog.findById(distroId) ?: return
+        _uiState.update {
+            it.copy(
+                selectedOciDistroId = distroId,
+                selectedOciTag = entry.defaultTag,
+                availableOciTags = entry.popularTags,
+                rootfsId = "${entry.id}-default"
+            )
+        }
+    }
+
+    fun selectOciTag(tag: String) {
+        _uiState.update { it.copy(selectedOciTag = tag) }
+    }
+
+    fun setCustomOciImage(imageWithTag: String) {
+        _uiState.update { it.copy(customOciImage = imageWithTag) }
+    }
+
+    fun fetchLiveOciTags(scope: CoroutineScope) {
+        val entry = OciDistroCatalog.findById(_uiState.value.selectedOciDistroId) ?: return
+        _uiState.update { it.copy(isFetchingOciTags = true) }
+        scope.launch(ioDispatcher) {
+            val res = ociRegistryClient.fetchTags(entry.repository)
+            withContext(mainDispatcher) {
+                if (res.isSuccess) {
+                    val tags = res.getOrThrow()
+                    _uiState.update {
+                        it.copy(
+                            isFetchingOciTags = false,
+                            availableOciTags = tags.take(30)
+                        )
+                    }
+                } else {
+                    _uiState.update { it.copy(isFetchingOciTags = false) }
+                }
+            }
         }
     }
 
@@ -259,7 +310,49 @@ class WizardViewModel(
 
                 // 1. Ensure target rootfs exists and is extracted/valid
                 if (!rootfsManager.isRootfsValid(state.rootfsId)) {
-                    if (state.rootfsSource == RootfsSourceType.LOCAL_ARCHIVE && state.localRootfsPath != null) {
+                    if (state.rootfsSource == RootfsSourceType.OCI_REGISTRY) {
+                        _uiState.update {
+                            it.copy(
+                                isDownloadingRootfs = true,
+                                provisioningStepDescription = "Pulling OCI container image..."
+                            )
+                        }
+                        val ociManager = ociPullManager ?: OciPullManager(
+                            dirs = dirs,
+                            rootfsManager = rootfsManager,
+                            prootRunner = ProotRunner(dirs),
+                            registryClient = ociRegistryClient
+                        )
+                        val repo = if (state.customOciImage.isNotBlank()) {
+                            state.customOciImage.substringBefore(":")
+                        } else {
+                            OciDistroCatalog.findById(state.selectedOciDistroId)?.repository ?: "library/ubuntu"
+                        }
+                        val tag = if (state.customOciImage.isNotBlank() && state.customOciImage.contains(":")) {
+                            state.customOciImage.substringAfter(":")
+                        } else {
+                            state.selectedOciTag
+                        }
+
+                        val pullResult = ociManager.pullAndProvision(
+                            repository = repo,
+                            tag = tag,
+                            rootfsId = state.rootfsId,
+                            username = state.username,
+                            onProgress = { prog ->
+                                _uiState.update { current ->
+                                    current.copy(
+                                        downloadProgressFraction = prog.progressPercent / 100f,
+                                        provisioningStepDescription = prog.message,
+                                        provisioningLogs = (current.provisioningLogs + prog.message).takeLast(200)
+                                    )
+                                }
+                            }
+                        )
+                        if (!pullResult.isSuccess) {
+                            throw IllegalStateException("OCI pull failed: ${pullResult.exceptionOrNull()?.message}")
+                        }
+                    } else if (state.rootfsSource == RootfsSourceType.LOCAL_ARCHIVE && state.localRootfsPath != null) {
                         _uiState.update {
                             it.copy(
                                 isExtractingRootfs = true,

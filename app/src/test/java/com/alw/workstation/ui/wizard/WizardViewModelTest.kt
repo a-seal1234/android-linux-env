@@ -188,4 +188,21 @@ class WizardViewModelTest {
         assertNull(finalState.provisioningError)
         assertTrue(finalState.provisioningLogs.isNotEmpty())
     }
+
+    @Test
+    fun testOciSelectionFlow() {
+        viewModel.selectRootfsSource(RootfsSourceType.OCI_REGISTRY)
+        assertEquals(RootfsSourceType.OCI_REGISTRY, viewModel.uiState.value.rootfsSource)
+
+        viewModel.selectOciDistro("ubuntu")
+        assertEquals("ubuntu", viewModel.uiState.value.selectedOciDistroId)
+        assertEquals("noble", viewModel.uiState.value.selectedOciTag)
+        assertEquals("ubuntu-default", viewModel.uiState.value.rootfsId)
+
+        viewModel.selectOciTag("jammy")
+        assertEquals("jammy", viewModel.uiState.value.selectedOciTag)
+
+        viewModel.setCustomOciImage("kalilinux/kali-rolling:latest")
+        assertEquals("kalilinux/kali-rolling:latest", viewModel.uiState.value.customOciImage)
+    }
 }

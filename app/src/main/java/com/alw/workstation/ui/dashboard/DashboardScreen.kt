@@ -15,6 +15,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -653,6 +654,25 @@ fun CreateWorkspaceDialog(
         title = { Text("Create New Workspace") },
         text = {
             Column {
+                Text(
+                    text = "Quick Presets from OCI Catalog:",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf("arch", "ubuntu", "debian", "fedora", "alpine").forEach { name ->
+                        AssistChip(
+                            onClick = { workspaceId = "$name-workstation" },
+                            label = { Text(name) }
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+
                 OutlinedTextField(
                     value = workspaceId,
                     onValueChange = { workspaceId = it },

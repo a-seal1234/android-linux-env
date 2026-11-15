@@ -17,6 +17,7 @@ enum class WizardPreset {
 
 enum class RootfsSourceType {
     DEFAULT_ARCH_ARM,
+    OCI_REGISTRY,
     LOCAL_ARCHIVE
 }
 
@@ -38,6 +39,11 @@ data class WizardUiState(
     val rootfsId: String = "archlinux-default",
     val rootfsSource: RootfsSourceType = RootfsSourceType.DEFAULT_ARCH_ARM,
     val localRootfsPath: String? = null,
+    val selectedOciDistroId: String = "archlinux",
+    val selectedOciTag: String = "base",
+    val customOciImage: String = "",
+    val availableOciTags: List<String> = listOf("base", "latest"),
+    val isFetchingOciTags: Boolean = false,
     val selectedPreset: WizardPreset = WizardPreset.CREATIVE_WORKSTATION,
     val username: String = "alw",
     val scaleFactor: Float = 1.75f,

@@ -27,6 +27,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -34,6 +35,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import com.alw.workstation.core.proot.oci.OciDistroCatalog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -87,6 +89,10 @@ fun WizardScreen(
                             state = state,
                             onPresetSelected = { viewModel.selectPreset(it) },
                             onSourceSelected = { type, path -> viewModel.setRootfsSource(type, path) },
+                            onOciDistroSelected = { viewModel.selectOciDistro(it) },
+                            onOciTagSelected = { viewModel.selectOciTag(it) },
+                            onCustomOciChanged = { viewModel.setCustomOciImage(it) },
+                            onFetchLiveTags = { viewModel.fetchLiveOciTags(scope) },
                             onUsernameChanged = { viewModel.setUsername(it) },
                             onScaleChanged = { viewModel.setScaleFactor(it) }
                         )
@@ -215,6 +221,10 @@ fun Step1DistroAndProfile(
     state: WizardUiState,
     onPresetSelected: (WizardPreset) -> Unit,
     onSourceSelected: (RootfsSourceType, String?) -> Unit,
+    onOciDistroSelected: (String) -> Unit,
+    onOciTagSelected: (String) -> Unit,
+    onCustomOciChanged: (String) -> Unit,
+    onFetchLiveTags: () -> Unit,
     onUsernameChanged: (String) -> Unit,
     onScaleChanged: (Float) -> Unit
 ) {
@@ -226,17 +236,155 @@ fun Step1DistroAndProfile(
             .verticalScroll(scrollState)
     ) {
         Text(
-            text = "Step 1: Choose Workstation Preset & Rootfs",
+            text = "Step 1: Choose Workstation Rootfs & Preset",
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold
         )
         Text(
-            text = "Select your workflow preset and configure your guest user identity.",
+            text = "Select an official Linux rootfs distribution and your workflow profile.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        // --- Rootfs Source Selection ---
+        Text(
+            text = "Distribution Source",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = state.rootfsSource == RootfsSourceType.DEFAULT_ARCH_ARM,
+                onClick = { onSourceSelected(RootfsSourceType.DEFAULT_ARCH_ARM, null) },
+                label = { Text("Arch Linux ARM") },
+                modifier = Modifier.weight(1f)
+            )
+            FilterChip(
+                selected = state.rootfsSource == RootfsSourceType.OCI_REGISTRY,
+                onClick = { onSourceSelected(RootfsSourceType.OCI_REGISTRY, null) },
+                label = { Text("OCI Registry Catalog") },
+                modifier = Modifier.weight(1f)
+            )
+            FilterChip(
+                selected = state.rootfsSource == RootfsSourceType.LOCAL_ARCHIVE,
+                onClick = { onSourceSelected(RootfsSourceType.LOCAL_ARCHIVE, "/data/local/tmp/rootfs.tar.gz") },
+                label = { Text("Local Archive") },
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // OCI Registry Catalog Browser
+        if (state.rootfsSource == RootfsSourceType.OCI_REGISTRY) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Curated Linux Distributions (arm64)",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OciDistroCatalog.ENTRIES.take(4).forEach { distro ->
+                            FilterChip(
+                                selected = state.selectedOciDistroId == distro.id,
+                                onClick = { onOciDistroSelected(distro.id) },
+                                label = { Text(distro.name) }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OciDistroCatalog.ENTRIES.drop(4).forEach { distro ->
+                            FilterChip(
+                                selected = state.selectedOciDistroId == distro.id,
+                                onClick = { onOciDistroSelected(distro.id) },
+                                label = { Text(distro.name) }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Selected Distro Tags
+                    val curDistro = OciDistroCatalog.findById(state.selectedOciDistroId)
+                    if (curDistro != null) {
+                        Text(
+                            text = "${curDistro.name} (${curDistro.repository}) Tags:",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            state.availableOciTags.take(4).forEach { tag ->
+                                FilterChip(
+                                    selected = state.selectedOciTag == tag,
+                                    onClick = { onOciTagSelected(tag) },
+                                    label = { Text(tag) }
+                                )
+                            }
+
+                            OutlinedButton(
+                                onClick = onFetchLiveTags,
+                                enabled = !state.isFetchingOciTags
+                            ) {
+                                if (state.isFetchingOciTags) {
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Text("Query All Tags")
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = state.customOciImage,
+                        onValueChange = onCustomOciChanged,
+                        label = { Text("Or Enter Custom OCI Image (e.g. library/ubuntu:noble)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        // --- Workstation Presets ---
+        Text(
+            text = "Workstation Preset",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
 
         // Preset 1: Creative Workstation
         PresetCard(
