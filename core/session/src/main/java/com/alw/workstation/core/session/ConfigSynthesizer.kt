@@ -59,6 +59,9 @@ object ConfigSynthesizer {
             appendLine("bind = \$mainMod, Q, killactive,")
             appendLine("bind = \$mainMod, M, exit,")
             appendLine()
+            appendLine("# Auto-launch default terminal")
+            appendLine("exec-once = kitty")
+            appendLine()
             if (isSoftwareRendering) {
                 appendLine("# Software fallback visual degradation (llvmpipe)")
                 appendLine("decoration {")
@@ -68,6 +71,8 @@ object ConfigSynthesizer {
                 appendLine("    }")
                 appendLine("    drop_shadow = false")
                 appendLine("}")
+                appendLine("env = WLR_RENDERER_ALLOW_SOFTWARE,1")
+                appendLine("env = LIBGL_ALWAYS_SOFTWARE,1")
             } else {
                 appendLine("# Hardware accelerated styling (Turnip Adreno 825)")
                 appendLine("decoration {")
@@ -93,6 +98,8 @@ object ConfigSynthesizer {
             appendLine("env = ELECTRON_OZONE_PLATFORM_HINT,wayland")
             appendLine("env = AQ_BACKEND,wayland")
             appendLine("env = WLR_BACKENDS,wayland")
+            appendLine("env = WLR_NO_HARDWARE_CURSORS,1")
+            appendLine("env = AQ_NO_MODIFIERS,1")
         }
     }
 

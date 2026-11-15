@@ -48,12 +48,16 @@ TASK-017 implements the full nested desktop compositor bring-up, PRoot PTY `/dev
 11-15 19:29:27.060 24891 25178 I ALW::WaylandBridgeNative: 144Hz Frame Pacing: 20 frames (total 7068) in 1004.1 ms | FPS: 19.9 | Frame Time: avg=50.21 ms, min=47.09 ms, max=54.10 ms
 ```
 
-### 2. Live Desktop Screenshot
+### 2. Live Desktop Screenshots
 - Confirmed live on 3200x2136 Xiaomi Pad 8 panel:
-  - Nested LabWC Openbox window titlebar with maximize/minimize/close decorations.
-  - Active, working `weston-terminal` running bash inside PRoot without crash.
+  - Real Arch Linux ARM desktop workstation running `labwc 0.20.2` and `kitty 0.50.0`.
+  - Android 16 SELinux PTY & pacman root access shim (`libalw_shim.so` via `/etc/ld.so.preload`) intercepting `ttyname_r`, `tcgetattr`, and `openat` for `/dev/pts/*`.
+  - `fastfetch 2.71.0` executed in `kitty` displaying the Cyan Arch Linux ARM logo, kernel `6.6.118-android15-8`, `kitty 0.50.0`, `labwc 0.20.2`, `Cortex-A720+Cortex-X4 (1+3+2+2) @ 3.21 GHz`, and 5.60 GiB memory.
+  - Active nested LabWC Openbox window titlebar with maximize/minimize/close decorations.
   - Resolution: 3200x2136 @ 1.75x HiDPI scale.
-  - Linked screenshot: [screen_task017_desktop.png](file:///media/DATA/project/android-linux-env/docs/tasks/TASK-017/evidence/screen_task017_desktop.png)
+  - Linked screenshots:
+    - [screen_hyprland_kitty.png](file:///media/DATA/project/android-linux-env/docs/tasks/TASK-017/evidence/screen_hyprland_kitty.png) (Arch Linux ARM + Kitty + Fastfetch + LabWC)
+    - [screen_task017_desktop.png](file:///media/DATA/project/android-linux-env/docs/tasks/TASK-017/evidence/screen_task017_desktop.png) (Weston terminal & desktop)
 
 ---
 

@@ -312,11 +312,11 @@ data class StackProfile(
                     configMode = ConfigMode.WRAP_AND_OVERRIDE,
                     userConfigPath = "/home/alw/.config/hypr/hyprland.conf",
                     sessionConfigPath = "/tmp/android-session.conf",
-                    extraArgs = listOf("-c", "/tmp/android-session.conf")
+                    extraArgs = listOf("-c", "/tmp/android-session.conf", "--i-am-really-stupid")
                 ),
                 gpu = GpuConfig(
                     driverMode = DriverMode.TURNIP_KGSL,
-                    externalDriverId = "turnip-mesa-25.0-adreno825",
+                    externalDriverId = "turnip-mesa-25.0.0-adreno825",
                     kgslNode = "/dev/kgsl-3d0",
                     mesaLoaderOverride = "zink",
                     tuDebugNoConform = true,

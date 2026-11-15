@@ -17,6 +17,10 @@ class ArchProvisioningScriptBuilderTest {
         // Boilerplate
         assertTrue(script.startsWith("#!/bin/bash\nset -eo pipefail"))
 
+        // DNS & Pacman 7 Sandbox configuration
+        assertTrue(script.contains("nameserver 1.1.1.1"))
+        assertTrue(script.contains("DisableSandbox"))
+
         // Step 1: Pacman keyrings
         assertTrue(script.contains("pacman-key --init"))
         assertTrue(script.contains("pacman-key --populate archlinuxarm"))
@@ -34,6 +38,8 @@ class ArchProvisioningScriptBuilderTest {
         assertTrue(script.contains("labwc"))
         assertTrue(script.contains("kitty"))
         assertTrue(script.contains("base-devel"))
+        assertTrue(script.contains("fastfetch"))
+        assertTrue(script.contains("fakeroot-tcp"))
 
         // Step 4: User creation & sudoers
         assertTrue(script.contains("useradd -m -s \"/bin/zsh\" -G wheel \"developer\""))
@@ -59,6 +65,13 @@ class ArchProvisioningScriptBuilderTest {
         assertTrue(script.contains("ln -sfn /tmp/runtime-alw/pulse /run/user/1000/pulse"))
         assertTrue(script.contains("PULSE_SERVER=unix:/run/user/1000/pulse/native unix:/tmp/runtime-alw/pulse/native"))
         assertTrue(script.contains("PIPEWIRE_RUNTIME_DIR=/tmp/runtime-alw"))
+
+        // Step 8: Android PTY & Pacman root access compatibility shim
+        assertTrue(script.contains("==> Step 8/8: Materializing Android PTY & Pacman access shim..."))
+        assertTrue(script.contains("/usr/lib/libalw_shim.so"))
+        assertTrue(script.contains("/etc/ld.so.preload"))
+        assertTrue(script.contains("ttyname_r"))
+        assertTrue(script.contains("libalw_shim.so"))
     }
 
     @Test

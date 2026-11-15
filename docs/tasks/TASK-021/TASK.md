@@ -54,4 +54,4 @@ Fully provision the Arch Linux ARM rootfs on the physical Xiaomi Pad 8 (`d370854
 - **Prerequisites:** TASK-019, TASK-020, TASK-009, TASK-010, TASK-017
 - **Implementation Gate:** Completed.
 - **Verification Gate:** Packages installed on device, `vulkaninfo --summary` Turnip output verified, `fastfetch` output verified, Hyprland + kitty rendered at 3200x2136 on Xiaomi Pad 8 screen.
-- **Review Gate:** Complete task handoff and evidence documentation in [verification.md](evidence/verification.md). Status: **Planned**.
+- **Review Gate:** Complete task handoff and evidence documentation in [verification.md](evidence/verification.md). Linked live screenshot: [screen_task021_hyprland_kitty.png](evidence/screen_task021_hyprland_kitty.png). Status: **Done**.

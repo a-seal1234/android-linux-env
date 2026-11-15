@@ -54,6 +54,12 @@ class CompositorOrchestrator(
             val err = prepResult.exceptionOrNull()?.message ?: "Session preparation failed"
             return LaunchOutcome.Error(err, prepResult.exceptionOrNull())
         }
+        val configContent = prepResult.getOrThrow()
+        if (rootfsDir != null && profile.compositor.configMode == StackProfile.ConfigMode.WRAP_AND_OVERRIDE) {
+            val sessionConfigFile = File(rootfsDir, profile.compositor.sessionConfigPath.removePrefix("/"))
+            sessionConfigFile.parentFile?.mkdirs()
+            sessionConfigFile.writeText(configContent)
+        }
 
         sessionController.updateState(SessionState.Running(profile, 0L))
         val startTime = timeProvider()

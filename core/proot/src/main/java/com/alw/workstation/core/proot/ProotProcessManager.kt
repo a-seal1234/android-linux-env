@@ -146,6 +146,7 @@ class ProotProcessManager(
             procEnv[k] = v
         }
 
+        Log.i(TAG, "Starting process: ${fullCmd.joinToString(" ")}")
         val process = processBuilder.start()
         val managed = ManagedProcess(process, command)
 
@@ -229,6 +230,7 @@ class ProotProcessManager(
         }
 
         val exitCode = if (completedExitCode != null) {
+            Log.i(TAG, "Process finished with exitCode: $completedExitCode (stdout: ${stdoutLines.size} lines, stderr: ${stderrLines.size} lines)")
             completedExitCode
         } else {
             Log.w(TAG, "Command execution timed out after ${timeoutMs}ms, terminating process")
