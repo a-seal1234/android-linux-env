@@ -203,6 +203,8 @@ class OciPullManager(
             Log.i(TAG, "Executing bootstrap command: $cmdString")
             val procBuilder = ProcessBuilder(launchCmd.binary, *launchCmd.arguments.toTypedArray()).apply {
                 directory(launchCmd.workingDir)
+                environment().remove("LD_PRELOAD")
+                environment().remove("LD_CONFIG_FILE")
                 environment().putAll(launchCmd.environment)
                 redirectErrorStream(true)
             }

@@ -18,6 +18,7 @@ import com.alw.workstation.core.session.model.StackProfile
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,6 +46,8 @@ class DashboardViewModel(
     private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main
 ) {
 
+    private val sessionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     private val _uiState = MutableStateFlow(DashboardUiState())
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
@@ -67,7 +70,7 @@ class DashboardViewModel(
     fun refresh() {
         val workspaces = rootfsManager.listRootfs()
         val profiles = profileRepository.listProfiles()
-        val defaultProfile = profiles.firstOrNull() ?: StackProfile.defaultArchXiaomiPad8()
+        val defaultProfile = profiles.find { it.id == "arch-kde-plasma" } ?: profiles.firstOrNull() ?: StackProfile.defaultArchXiaomiPad8()
         val activeDriver = driverManager.getActiveDriver()
         val sessionState = sessionController.sessionState.value
         val audioStatus = audioBridgeManager.getStatus()
@@ -158,7 +161,7 @@ class DashboardViewModel(
         }
     }
 
-    fun launchSession(scope: CoroutineScope) {
+    fun launchSession(scope: CoroutineScope = sessionScope) {
         val profile = _uiState.value.activeProfile ?: StackProfile.defaultArchXiaomiPad8()
         val rootfsDir = dirs.getRootfsDir(profile.distro.rootfsId)
         val runtimeDir = dirs.getRuntimeSocketDir("session-${profile.id}")
@@ -230,8 +233,17 @@ class DashboardViewModel(
 
     fun switchCompositor(type: StackProfile.CompositorType) {
         val currentProfile = _uiState.value.activeProfile ?: StackProfile.defaultArchXiaomiPad8()
+        val exec = when (type) {
+            StackProfile.CompositorType.PLASMA -> "startplasma-wayland"
+            StackProfile.CompositorType.LABWC -> "labwc"
+            StackProfile.CompositorType.HYPRLAND -> "Hyprland"
+            StackProfile.CompositorType.CUSTOM -> currentProfile.compositor.execCommand
+        }
         val updated = currentProfile.copy(
-            compositor = currentProfile.compositor.copy(type = type)
+            compositor = currentProfile.compositor.copy(
+                type = type,
+                execCommand = exec
+            )
         )
         profileRepository.saveProfile(updated)
         _uiState.update { it.copy(activeProfile = updated) }

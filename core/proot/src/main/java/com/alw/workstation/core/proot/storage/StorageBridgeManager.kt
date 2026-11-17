@@ -63,7 +63,7 @@ class StorageBridgeManager(
         if (!profile.storage.bindSdcard) return mounts
 
         val hostStorage = sharedStorageOverride ?: File(PRIMARY_SHARED_STORAGE)
-        if (hostStorage.exists() && hostStorage.isDirectory) {
+        if (hostStorage.exists() && hostStorage.isDirectory && hostStorage.canRead()) {
             // 1. Primary shared storage mount
             mounts.add(
                 BindMount(

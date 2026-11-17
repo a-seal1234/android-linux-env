@@ -98,8 +98,16 @@ class StackConfiguratorViewModel(
 
     fun updateCompositor(type: StackProfile.CompositorType) {
         _uiState.update { current ->
-            val updatedCompositor = current.profile.compositor.copy(type = type)
-            // If switching to LabWC, optionally adjust default driver to software or keep current
+            val execCmd = when (type) {
+                StackProfile.CompositorType.HYPRLAND -> "hyprland"
+                StackProfile.CompositorType.LABWC -> "labwc"
+                StackProfile.CompositorType.PLASMA -> "startplasma-wayland"
+                StackProfile.CompositorType.CUSTOM -> current.profile.compositor.execCommand
+            }
+            val updatedCompositor = current.profile.compositor.copy(
+                type = type,
+                execCommand = execCmd
+            )
             current.copy(profile = current.profile.copy(compositor = updatedCompositor))
         }
     }

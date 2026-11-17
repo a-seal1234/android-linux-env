@@ -21,31 +21,76 @@ class RiceShimGeneratorTest {
     }
 
     @Test
-    fun testInstallShimsCreatesAllFourFiles() {
+    fun testInstallShimsCreatesAllRequiredFiles() {
         RiceShimGenerator.installShims(targetDir)
 
-        val systemctl = File(targetDir, "systemctl")
-        val fakeroot = File(targetDir, "fakeroot")
-        val makepkg = File(targetDir, "makepkg")
-        val sudo = File(targetDir, "sudo")
+        val expectedShims = listOf(
+            "startplasma-wayland",
+            "plasma-session-start",
+            "systemctl",
+            "service",
+            "loginctl",
+            "org_kde_powerdevil",
+            "upowerd",
+            "udisksd",
+            "pkexec",
+            "fakeroot",
+            "makepkg",
+            "sudo",
+            "xdg-open"
+        )
 
-        assertTrue("systemctl shim must exist", systemctl.isFile)
-        assertTrue("systemctl shim must be executable", systemctl.canExecute())
+        for (shimName in expectedShims) {
+            val file = File(targetDir, shimName)
+            assertTrue("$shimName shim must exist", file.isFile)
+            assertTrue("$shimName shim must be executable", file.canExecute())
+        }
+    }
 
-        assertTrue("fakeroot shim must exist", fakeroot.isFile)
-        assertTrue("fakeroot shim must be executable", fakeroot.canExecute())
+    @Test
+    fun testStartPlasmaWaylandShimContent() {
+        val content = RiceShimGenerator.STARTPLASMA_WAYLAND_SHIM
+        assertTrue(content.contains("kwin_wayland"))
+        assertTrue(content.contains("plasma-session-start"))
+        assertTrue(content.contains("XDG_RUNTIME_DIR"))
 
-        assertTrue("makepkg shim must exist", makepkg.isFile)
-        assertTrue("makepkg shim must be executable", makepkg.canExecute())
+        val sessionContent = RiceShimGenerator.PLASMA_SESSION_START_SHIM
+        assertTrue(sessionContent.contains("plasmashell &"))
+        assertTrue(sessionContent.contains("konsole"))
+    }
 
-        assertTrue("sudo shim must exist", sudo.isFile)
-        assertTrue("sudo shim must be executable", sudo.canExecute())
+    @Test
+    fun testLoginctlShimContent() {
+        val content = RiceShimGenerator.LOGINCTL_SHIM
+        assertTrue(content.contains("Active=yes"))
+        assertTrue(content.contains("State=active"))
+        assertTrue(content.contains("Type=wayland"))
+        assertTrue(content.contains("exit 0"))
+    }
+
+    @Test
+    fun testPkexecShimContent() {
+        val content = RiceShimGenerator.PKEXEC_SHIM
+        assertTrue(content.contains("exec \"$@\""))
+    }
+
+    @Test
+    fun testXdgOpenShimContent() {
+        val content = RiceShimGenerator.XDG_OPEN_SHIM
+        assertTrue(content.contains("am start -a android.intent.action.VIEW"))
+    }
+
+    @Test
+    fun testExitZeroStubContent() {
+        val content = RiceShimGenerator.EXIT_ZERO_STUB
+        assertTrue(content.contains("exit 0"))
     }
 
     @Test
     fun testSystemctlShimContent() {
         val content = RiceShimGenerator.SYSTEMCTL_SHIM
-        assertTrue(content.contains("GUI_DAEMONS=\"waybar swaync mako swww-daemon pipewire wireplumber ags\""))
+        assertTrue(content.contains("GUI_DAEMONS=\"waybar swaync mako swww-daemon pipewire wireplumber ags plasma-plasmashell plasma-xdg-desktop-portal-kde\""))
+        assertTrue(content.contains("HARDWARE_DAEMONS=\"NetworkManager bluetooth ufw powerdevil upower udisks2\""))
         assertTrue(content.contains("autostart.conf"))
         assertTrue(content.contains("exec-once ="))
         assertTrue(content.contains("--user"))

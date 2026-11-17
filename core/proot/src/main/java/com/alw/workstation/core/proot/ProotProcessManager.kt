@@ -41,7 +41,9 @@ class ProotProcessManager(
 
     class ManagedProcess(
         val process: Process,
-        val command: ProotRunner.LaunchCommand
+        val command: ProotRunner.LaunchCommand,
+        val stdoutThread: Thread? = null,
+        val stderrThread: Thread? = null
     ) {
         val isAlive: Boolean get() = process.isAlive
 
@@ -142,21 +144,32 @@ class ProotProcessManager(
         }
 
         val procEnv = processBuilder.environment()
+        // Strip Android runtime / Zygote pollution that breaks PRoot / native ELF execution
+        procEnv.remove("LD_PRELOAD")
+        procEnv.remove("LD_CONFIG_FILE")
         for ((k, v) in command.environment) {
             procEnv[k] = v
         }
 
         Log.i(TAG, "Starting process: ${fullCmd.joinToString(" ")}")
         val process = processBuilder.start()
-        val managed = ManagedProcess(process, command)
 
-        // Asynchronous stdout pump thread
-        Thread({
+        val pidStr = try {
+            val method = process.javaClass.getMethod("pid")
+            (method.invoke(process) as? Number)?.toString() ?: "unknown"
+        } catch (_: Throwable) {
+            "unknown"
+        }
+
+        var managedRef: ManagedProcess? = null
+
+        val stdoutThread = Thread({
             try {
                 BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
                     var line: String? = reader.readLine()
                     while (line != null) {
-                        managed.emitStdout(line)
+                        Log.d(TAG, "[out] $line")
+                        managedRef?.emitStdout(line)
                         listener?.onStdoutLine(line)
                         line = reader.readLine()
                     }
@@ -164,15 +177,15 @@ class ProotProcessManager(
             } catch (e: Exception) {
                 Log.d(TAG, "Stdout reader ended: ${e.message}")
             }
-        }, "ProotStdoutPump-${managed.pid() ?: "unknown"}").start()
+        }, "ProotStdoutPump-$pidStr")
 
-        // Asynchronous stderr pump thread
-        Thread({
+        val stderrThread = Thread({
             try {
                 BufferedReader(InputStreamReader(process.errorStream)).use { reader ->
                     var line: String? = reader.readLine()
                     while (line != null) {
-                        managed.emitStderr(line)
+                        Log.w(TAG, "[err] $line")
+                        managedRef?.emitStderr(line)
                         listener?.onStderrLine(line)
                         line = reader.readLine()
                     }
@@ -180,7 +193,18 @@ class ProotProcessManager(
             } catch (e: Exception) {
                 Log.d(TAG, "Stderr reader ended: ${e.message}")
             }
-        }, "ProotStderrPump-${managed.pid() ?: "unknown"}").start()
+        }, "ProotStderrPump-$pidStr")
+
+        val managed = ManagedProcess(
+            process = process,
+            command = command,
+            stdoutThread = stdoutThread,
+            stderrThread = stderrThread
+        )
+        managedRef = managed
+
+        stdoutThread.start()
+        stderrThread.start()
 
         // Asynchronous completion watcher
         Thread({
@@ -190,7 +214,7 @@ class ProotProcessManager(
             } catch (e: InterruptedException) {
                 listener?.onProcessExited(-1)
             }
-        }, "ProotWaitPump-${managed.pid() ?: "unknown"}").start()
+        }, "ProotWaitPump-$pidStr").start()
 
         return managed
     }
@@ -229,8 +253,16 @@ class ProotProcessManager(
             }
         }
 
+        try {
+            managed.stdoutThread?.join(500)
+            managed.stderrThread?.join(500)
+        } catch (_: InterruptedException) {}
+
         val exitCode = if (completedExitCode != null) {
             Log.i(TAG, "Process finished with exitCode: $completedExitCode (stdout: ${stdoutLines.size} lines, stderr: ${stderrLines.size} lines)")
+            if (completedExitCode != 0 && stderrLines.isNotEmpty()) {
+                Log.e(TAG, "Process stderr dump (exitCode=$completedExitCode):\n${stderrLines.joinToString("\n")}")
+            }
             completedExitCode
         } else {
             Log.w(TAG, "Command execution timed out after ${timeoutMs}ms, terminating process")

@@ -5,8 +5,16 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/ptrace.h>
+#include <sys/prctl.h>
+
+#ifndef PR_SET_PTRACER
+#define PR_SET_PTRACER 0x59616d61
+#define PR_SET_PTRACER_ANY ((unsigned long)-1)
+#endif
 #include <unistd.h>
 #include <fcntl.h>
+#include <csignal>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -115,9 +123,8 @@ Java_com_alw_workstation_bridge_wayland_PtyBridge_nativeForkSubprocess(
             }
         }
     }
-    if (argsVec.empty()) {
-        argsVec.emplace_back(cmdStr);
-    }
+    // argv[0] must always be the command binary per POSIX standard convention
+    argvList.push_back(const_cast<char*>(cmdStr));
     for (auto& a : argsVec) {
         argvList.push_back(const_cast<char*>(a.c_str()));
     }
@@ -138,8 +145,21 @@ Java_com_alw_workstation_bridge_wayland_PtyBridge_nativeForkSubprocess(
             }
         }
     }
+
+    // Ensure host PATH is present for dynamic loaders and system utilities
+    bool hasPath = false;
+    for (const auto& e : envVec) {
+        if (e.rfind("PATH=", 0) == 0) {
+            hasPath = true;
+            break;
+        }
+    }
+    if (!hasPath) {
+        envVec.emplace_back("PATH=/system/bin:/system/xbin");
+    }
+
     for (auto& e : envVec) {
-        envpList.push_back(const_cast<char*>(e.c_str()));
+        envpList.push_back(strdup(e.c_str()));
     }
     envpList.push_back(nullptr);
 
@@ -147,6 +167,9 @@ Java_com_alw_workstation_bridge_wayland_PtyBridge_nativeForkSubprocess(
     memset(&ws, 0, sizeof(ws));
     ws.ws_col = static_cast<unsigned short>(cols > 0 ? cols : 80);
     ws.ws_row = static_cast<unsigned short>(rows > 0 ? rows : 24);
+
+    int ptraceRet = ptrace(PTRACE_TRACEME, 0, nullptr, nullptr);
+    LOGI("ptrace(PTRACE_TRACEME) in parent returned %d (errno=%d: %s)", ptraceRet, errno, strerror(errno));
 
     int masterFd = -1;
     pid_t pid = forkpty(&masterFd, nullptr, nullptr, &ws);
@@ -160,6 +183,11 @@ Java_com_alw_workstation_bridge_wayland_PtyBridge_nativeForkSubprocess(
 
     if (pid == 0) {
         // Child process
+        // Restore dumpable so PRoot and its tracees can use ptrace(PTRACE_TRACEME)
+        int dRet = prctl(PR_SET_DUMPABLE, 1, 0, 0, 0);
+        int pRet = prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0);
+        LOGI("child pid %d: prctl PR_SET_DUMPABLE=%d, PR_SET_PTRACER=%d", getpid(), dRet, pRet);
+
         if (cwdStr != nullptr && strlen(cwdStr) > 0) {
             chdir(cwdStr);
         }
@@ -172,18 +200,35 @@ Java_com_alw_workstation_bridge_wayland_PtyBridge_nativeForkSubprocess(
             }
         }
 
+        LOGI("child pid %d executing %s (argc=%zu)", getpid(), cmdStr, argvList.size() - 1);
+
+        // Prevent Zygote linker-namespace leakage (LD_LIBRARY_PATH / LD_PRELOAD) across
+        // fork()/exec(): the guest glibc loader must never traverse Android app library paths.
+        unsetenv("LD_LIBRARY_PATH");
+        unsetenv("LD_PRELOAD");
+
+        for (size_t i = 0; argvList[i] != nullptr; ++i) {
+            LOGI("  argv[%zu] = %s", i, argvList[i]);
+        }
+        for (size_t i = 0; envpList[i] != nullptr; ++i) {
+            LOGI("  envp[%zu] = %s", i, envpList[i]);
+        }
+
         execv(cmdStr, argvList.data());
-        // If execv returns, it failed
+        LOGE("execv %s failed: %s (errno=%d)", cmdStr, strerror(errno), errno);
         _exit(127);
     }
 
     // Parent process
     env->ReleaseStringUTFChars(jCmd, cmdStr);
     if (cwdStr != nullptr) env->ReleaseStringUTFChars(jCwd, cwdStr);
+    for (char* e : envpList) {
+        if (e != nullptr) free(e);
+    }
 
-    int flags = fcntl(masterFd, F_GETFL, 0);
+    int flags = fcntl(masterFd, F_GETFD, 0);
     if (flags >= 0) {
-        fcntl(masterFd, F_SETFL, flags | O_CLOEXEC);
+        fcntl(masterFd, F_SETFD, flags | FD_CLOEXEC);
     }
 
     LOGI("forkpty spawned pid %d with masterFd %d", pid, masterFd);
@@ -197,6 +242,34 @@ Java_com_alw_workstation_bridge_wayland_PtyBridge_nativeForkSubprocess(
     jint data[2] = { static_cast<jint>(pid), masterFd };
     env->SetIntArrayRegion(result, 0, 2, data);
     return result;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_alw_workstation_bridge_wayland_PtyBridge_nativeWaitPid(
+        JNIEnv* /* env */,
+        jobject /* thiz */,
+        jint pid,
+        jboolean noHang) {
+    int status = 0;
+    int options = noHang ? WNOHANG : 0;
+    pid_t ret = waitpid(pid, &status, options);
+    if (ret < 0) {
+        if (errno == ECHILD) return -2; // No child / reaped
+        LOGW("waitpid(%d) error: %s (errno=%d)", pid, strerror(errno), errno);
+        return -1;
+    }
+    if (ret == 0) {
+        return -3; // Still running (WNOHANG)
+    }
+    LOGI("waitpid(%d) reaped: ret=%d status=0x%x WIFEXITED=%d code=%d WIFSIGNALED=%d sig=%d",
+         pid, ret, status, WIFEXITED(status), WEXITSTATUS(status), WIFSIGNALED(status), WTERMSIG(status));
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+    if (WIFSIGNALED(status)) {
+        return 128 + WTERMSIG(status);
+    }
+    return 0;
 }
 
 } // extern "C"

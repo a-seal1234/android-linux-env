@@ -24,6 +24,8 @@ class EnvironmentGeneratorTest {
         assertEquals("wayland", env["ELECTRON_OZONE_PLATFORM_HINT"])
         assertEquals("1", env["MOZ_ENABLE_WAYLAND"])
         assertEquals("wayland", env["QT_QPA_PLATFORM"])
+        assertEquals("0", env["UV_USE_IO_URING"])
+        assertEquals("1", env["APPIMAGE_EXTRACT_AND_RUN"])
 
         // Build cache redirection
         assertEquals("/home/alw/.cache/cargo-target", env["CARGO_TARGET_DIR"])
@@ -34,15 +36,12 @@ class EnvironmentGeneratorTest {
         // Turnip KGSL variables
         assertEquals("/opt/drivers/turnip/active/freedreno_icd.aarch64.json", env["VK_ICD_FILENAMES"])
         assertEquals("/opt/drivers/turnip/active/freedreno_icd.aarch64.json", env["VK_DRIVER_FILES"])
-        assertEquals("/opt/drivers/turnip/active/lib/dri", env["LIBGL_DRIVERS_PATH"])
-        assertEquals("/opt/drivers/turnip/active/lib", env["LD_LIBRARY_PATH"])
         assertEquals("zink", env["MESA_LOADER_DRIVER_OVERRIDE"])
         assertEquals("zink", env["GALLIUM_DRIVER"])
         assertEquals("noconform", env["TU_DEBUG"])
 
         // Audio bridge variables
-        assertTrue(env["PULSE_SERVER"]!!.contains("/run/user/1000/pulse/native"))
-        assertTrue(env["PULSE_SERVER"]!!.contains("/tmp/runtime-alw/pulse/native"))
+        assertEquals("unix:/run/user/1000/pulse/native", env["PULSE_SERVER"])
         assertEquals("/tmp/runtime-alw", env["PIPEWIRE_RUNTIME_DIR"])
     }
 

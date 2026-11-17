@@ -66,7 +66,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var prootRunner: ProotRunner
     private lateinit var processManager: ProotProcessManager
     private lateinit var provisioner: ArchProvisioner
-    private lateinit var sessionLauncher: ProotSessionLauncher
+    private lateinit var sessionLauncher: com.alw.workstation.core.session.SessionProcessLauncher
     private lateinit var orchestrator: CompositorOrchestrator
     private lateinit var audioBridgeManager: AudioBridgeManager
     private lateinit var serverManager: WaylandServerManager
@@ -93,6 +93,7 @@ class MainActivity : ComponentActivity() {
         dirs.ensureDirectoriesExist()
 
         rootfsManager = RootfsManager(dirs)
+        android.util.Log.i("ALW_CHECK", "hasAnyRootfs = ${rootfsManager.hasAnyRootfs()}, rootfsBaseDir = ${dirs.rootfsBaseDir.absolutePath}, listFiles = ${dirs.rootfsBaseDir.listFiles()?.map { it.name }}")
         rootfsExtractor = RootfsExtractor(dirs)
         releaseFetcher = GitHubReleaseFetcher()
         driverManager = TurnipDriverManager(dirs, releaseFetcher)
@@ -102,7 +103,7 @@ class MainActivity : ComponentActivity() {
         prootRunner = ProotRunner(dirs)
         processManager = ProotProcessManager()
         provisioner = ArchProvisioner(dirs, rootfsManager, prootRunner, processManager)
-        sessionLauncher = ProotSessionLauncher(prootRunner, processManager)
+        sessionLauncher = com.alw.workstation.launcher.PtySessionLauncher(prootRunner)
         orchestrator = CompositorOrchestrator(sessionController, sessionLauncher)
 
         audioBridgeManager = AudioBridgeManager()

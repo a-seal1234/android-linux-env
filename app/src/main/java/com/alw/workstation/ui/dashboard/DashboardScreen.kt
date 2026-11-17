@@ -82,7 +82,7 @@ fun DashboardScreen(
             ActiveProfileHeroCard(
                 profile = state.activeProfile,
                 onLaunch = {
-                    viewModel.launchSession(scope)
+                    viewModel.launchSession()
                     onLaunchSession()
                 },
                 onOpenTerminal = onOpenTerminal,
@@ -307,13 +307,30 @@ fun CompositorSwitcherCard(
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (profile?.compositor?.type == StackProfile.CompositorType.LABWC) {
-                        Button(
-                            onClick = { onSwitchCompositor(StackProfile.CompositorType.HYPRLAND) }
-                        ) {
-                            Text("Switch to Hyprland")
+                    when (profile?.compositor?.type) {
+                        StackProfile.CompositorType.LABWC -> {
+                            Button(
+                                onClick = { onSwitchCompositor(StackProfile.CompositorType.PLASMA) }
+                            ) {
+                                Text("Switch to Plasma 6")
+                            }
                         }
-                    } else {
+                        StackProfile.CompositorType.PLASMA -> {
+                            Button(
+                                onClick = { onSwitchCompositor(StackProfile.CompositorType.HYPRLAND) }
+                            ) {
+                                Text("Switch to Hyprland")
+                            }
+                        }
+                        else -> {
+                            Button(
+                                onClick = { onSwitchCompositor(StackProfile.CompositorType.PLASMA) }
+                            ) {
+                                Text("Switch to Plasma 6")
+                            }
+                        }
+                    }
+                    if (profile?.compositor?.type != StackProfile.CompositorType.LABWC) {
                         Button(
                             onClick = onTriggerSafeMode,
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)

@@ -1,0 +1,61 @@
+diff --git a/src/tracee/event.c b/src/tracee/event.c
+index ce59f07..3f28752 100644
+--- a/src/tracee/event.c
++++ b/src/tracee/event.c
+@@ -602,7 +602,20 @@ static int handle_tracee_event_kernel_4_8(Tracee *tracee, int tracee_status)
+ 			break;
+ 
+ 		default:
+-			/* Deliver this signal as-is.  */
++			/* Android 16+ untrusted_app seccomp filters trap guest
++			 * syscalls that PRoot can not rewrite in time (the
++			 * seccomp filter runs before the syscall-entry ptrace
++			 * stop), e.g. rseq(2) issued by the guest glibc.  The
++			 * resulting SIGSYS stops are seccomp artifacts: suppress
++			 * them so the aborted syscall simply returns -ENOSYS
++			 * instead of killing the whole session.  Never swallow
++			 * SIGSYS when PRoot's own seccomp acceleration is on,
++			 * since that machinery relies on SIGSYS stops. */
++			if (signal == SIGSYS && tracee->seccomp != ENABLED)
++				signal = 0;
++			else
++				/* Deliver this signal as-is.  */
++				break;
+ 			break;
+ 		}
+ 	}
+@@ -831,7 +844,20 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
+ 			break;
+ 
+ 		default:
+-			/* Deliver this signal as-is.  */
++			/* Android 16+ untrusted_app seccomp filters trap guest
++			 * syscalls that PRoot can not rewrite in time (the
++			 * seccomp filter runs before the syscall-entry ptrace
++			 * stop), e.g. rseq(2) issued by the guest glibc.  The
++			 * resulting SIGSYS stops are seccomp artifacts: suppress
++			 * them so the aborted syscall simply returns -ENOSYS
++			 * instead of killing the whole session.  Never swallow
++			 * SIGSYS when PRoot's own seccomp acceleration is on,
++			 * since that machinery relies on SIGSYS stops. */
++			if (signal == SIGSYS && tracee->seccomp != ENABLED)
++				signal = 0;
++			else
++				/* Deliver this signal as-is.  */
++				break;
+ 			break;
+ 		}
+ 	}
+diff --git a/src/tracee/reg.c b/src/tracee/reg.c
+index a0c1784..a7fb0d3 100644
+--- a/src/tracee/reg.c
++++ b/src/tracee/reg.c
+@@ -308,7 +308,7 @@ int push_regs(Tracee *tracee)
+ 		 * to allow write/read of current sycall number.  */
+ 		if (current_sysnum != REG(tracee, ORIGINAL, SYSARG_NUM)) {
+ 			regs.iov_base = &current_sysnum;
+-			regs.iov_len = sizeof(current_sysnum);
++			regs.iov_len  = sizeof(current_sysnum);
+ 			status = ptrace(PTRACE_SETREGSET, tracee->pid, NT_ARM_SYSTEM_CALL, &regs);
+ 			if (status < 0)
+ 				note(tracee, WARNING, SYSTEM, "can't set the syscall number");

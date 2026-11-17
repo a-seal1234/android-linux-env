@@ -161,9 +161,10 @@ struct ShmPoolStorage {
     int fd = -1;
     int32_t size = 0;
     uint8_t* mappedData = nullptr;
+    std::vector<uint8_t> localData;
 
     ~ShmPoolStorage() {
-        if (mappedData != nullptr && size > 0) {
+        if (mappedData != nullptr && mappedData != localData.data() && size > 0) {
             munmap(mappedData, size);
             mappedData = nullptr;
         }
@@ -193,6 +194,7 @@ struct ClientSurface {
     uint32_t surfaceId;
     uint32_t attachedBufferId = 0;
     std::vector<uint32_t> frameCallbacks;
+    std::vector<uint32_t> presentationFeedbacks;
     bool isCursor = false;
     bool isXdgSurface = false;
 };
@@ -250,6 +252,12 @@ struct WaylandClient {
     uint32_t tabletManagerId = 0;
     uint32_t decorationManagerId = 0;
     uint32_t dataDeviceManagerId = 0;
+    uint32_t singlePixelBufferManagerId = 0;
+    uint32_t viewporterId = 0;
+    uint32_t pointerConstraintsId = 0;
+    uint32_t presentationId = 0;
+    uint32_t toplevelIconManagerId = 0;
+    uint32_t shortcutsInhibitManagerId = 0;
 
     uint32_t activeSurfaceId = 0;
     bool pointerEntered = false;
@@ -267,6 +275,9 @@ struct WaylandClient {
     std::unordered_map<uint32_t, XdgPopup> xdgPopups;
     std::unordered_map<uint32_t, Subsurface> subsurfaces;
     std::unordered_map<uint32_t, ToplevelDecoration> decorations;
+    std::unordered_set<uint32_t> viewports;
+    std::unordered_set<uint32_t> lockedPointers;
+    std::unordered_set<uint32_t> confinedPointers;
     std::unordered_set<uint32_t> dataSources;
     std::unordered_set<uint32_t> dataDevices;
 
@@ -274,6 +285,12 @@ struct WaylandClient {
         activeSurfaceId = 0;
         pointerEntered = false;
         keyboardEntered = false;
+        singlePixelBufferManagerId = 0;
+        viewporterId = 0;
+        pointerConstraintsId = 0;
+        presentationId = 0;
+        toplevelIconManagerId = 0;
+        shortcutsInhibitManagerId = 0;
         shmPools.clear();
         buffers.clear();
         surfaces.clear();
@@ -283,6 +300,9 @@ struct WaylandClient {
         xdgPopups.clear();
         subsurfaces.clear();
         decorations.clear();
+        viewports.clear();
+        lockedPointers.clear();
+        confinedPointers.clear();
         dataSources.clear();
         dataDevices.clear();
         if (pendingFd >= 0) {
@@ -838,6 +858,12 @@ private:
         m_globals.push_back({7, "wl_output", 4});
         m_globals.push_back({8, "wl_data_device_manager", 3});
         m_globals.push_back({9, "zxdg_decoration_manager_v1", 1});
+        m_globals.push_back({10, "wp_single_pixel_buffer_manager_v1", 1});
+        m_globals.push_back({11, "wp_viewporter", 1});
+        m_globals.push_back({12, "zwp_pointer_constraints_v1", 1});
+        m_globals.push_back({13, "wp_presentation", 1});
+        m_globals.push_back({14, "xdg_toplevel_icon_manager_v1", 1});
+        m_globals.push_back({15, "zwp_keyboard_shortcuts_inhibit_manager_v1", 1});
     }
 
     uint32_t nextSerial() {
@@ -1061,6 +1087,21 @@ private:
                     client.decorationManagerId = newId;
                 } else if (iface == "zwp_tablet_manager_v2") {
                     client.tabletManagerId = newId;
+                } else if (iface == "wp_single_pixel_buffer_manager_v1") {
+                    client.singlePixelBufferManagerId = newId;
+                } else if (iface == "wp_viewporter") {
+                    client.viewporterId = newId;
+                } else if (iface == "zwp_pointer_constraints_v1") {
+                    client.pointerConstraintsId = newId;
+                } else if (iface == "wp_presentation") {
+                    client.presentationId = newId;
+                    WaylandMessageWriter clockMsg(newId, 0); // wp_presentation.clock_id
+                    clockMsg.putUint32(1); // CLOCK_MONOTONIC
+                    sendPacket(client.fd, clockMsg);
+                } else if (iface == "xdg_toplevel_icon_manager_v1") {
+                    client.toplevelIconManagerId = newId;
+                } else if (iface == "zwp_keyboard_shortcuts_inhibit_manager_v1") {
+                    client.shortcutsInhibitManagerId = newId;
                 }
             }
             return;
@@ -1196,6 +1237,29 @@ private:
                     sendPacket(client.fd, frameDone);
                 }
                 surface.frameCallbacks.clear();
+
+                // Send presentation feedback events (wp_presentation_feedback.presented)
+                if (!surface.presentationFeedbacks.empty()) {
+                    struct timespec ts;
+                    clock_gettime(CLOCK_MONOTONIC, &ts);
+                    uint32_t tv_sec_hi = static_cast<uint32_t>(static_cast<uint64_t>(ts.tv_sec) >> 32);
+                    uint32_t tv_sec_lo = static_cast<uint32_t>(ts.tv_sec & 0xFFFFFFFF);
+                    uint32_t tv_nsec = static_cast<uint32_t>(ts.tv_nsec);
+                    uint32_t refresh_nsec = 1000000000 / 144; // 144Hz (~6.94ms)
+
+                    for (uint32_t fb : surface.presentationFeedbacks) {
+                        WaylandMessageWriter p(fb, 1); // presented
+                        p.putUint32(tv_sec_hi);
+                        p.putUint32(tv_sec_lo);
+                        p.putUint32(tv_nsec);
+                        p.putUint32(refresh_nsec);
+                        p.putUint32(0); // seq_hi
+                        p.putUint32(static_cast<uint32_t>(m_frameCount)); // seq_lo
+                        p.putUint32(0x1); // KIND_VSYNC
+                        sendPacket(client.fd, p);
+                    }
+                    surface.presentationFeedbacks.clear();
+                }
             }
             return;
         }
@@ -1206,18 +1270,6 @@ private:
                 // wl_seat.get_pointer(new_id)
                 client.pointerId = reader.readUint32();
                 client.pointerEntered = false;
-                if (client.activeSurfaceId > 0) {
-                    WaylandMessageWriter enter(client.pointerId, 0);
-                    enter.putUint32(nextSerial());
-                    enter.putUint32(client.activeSurfaceId);
-                    enter.putInt32(wl_fixed_from_double(m_pointerState.x));
-                    enter.putInt32(wl_fixed_from_double(m_pointerState.y));
-                    sendPacket(client.fd, enter);
-
-                    WaylandMessageWriter frame(client.pointerId, 5);
-                    sendPacket(client.fd, frame);
-                    client.pointerEntered = true;
-                }
             } else if (opcode == 1) {
                 // wl_seat.get_keyboard(new_id)
                 client.keyboardId = reader.readUint32();
@@ -1239,24 +1291,6 @@ private:
                 rpt.putInt32(25);
                 rpt.putInt32(300);
                 sendPacket(client.fd, rpt);
-
-                if (client.activeSurfaceId > 0) {
-                    WaylandMessageWriter enter(client.keyboardId, 1);
-                    enter.putUint32(nextSerial());
-                    enter.putUint32(client.activeSurfaceId);
-                    enter.putUint32(0); // empty keys array length
-                    sendPacket(client.fd, enter);
-
-                    WaylandMessageWriter mods(client.keyboardId, 4);
-                    mods.putUint32(nextSerial());
-                    mods.putUint32(m_depressedModifiers);
-                    mods.putUint32(0);
-                    mods.putUint32(m_lockedModifiers);
-                    mods.putUint32(0);
-                    sendPacket(client.fd, mods);
-
-                    client.keyboardEntered = true;
-                }
             } else if (opcode == 2) {
                 // wl_seat.get_touch(new_id)
                 client.touchId = reader.readUint32();
@@ -1490,6 +1524,146 @@ private:
                 WaylandMessageWriter decCfg(objId, 0);
                 decCfg.putUint32(1);
                 sendPacket(client.fd, decCfg);
+            }
+            return;
+        }
+
+        // 16. wp_single_pixel_buffer_manager_v1 requests
+        if (client.singlePixelBufferManagerId > 0 && objId == client.singlePixelBufferManagerId) {
+            if (opcode == 0) {
+                client.singlePixelBufferManagerId = 0;
+            } else if (opcode == 1) {
+                // create_u32_rgba_buffer(new_id id, uint r, uint g, uint b, uint a)
+                uint32_t bufId = reader.readUint32();
+                uint32_t r = reader.readUint32();
+                uint32_t g = reader.readUint32();
+                uint32_t b = reader.readUint32();
+                uint32_t a = reader.readUint32();
+
+                auto storage = std::make_shared<ShmPoolStorage>();
+                storage->size = 4;
+                storage->localData.resize(4);
+                uint8_t pr = static_cast<uint8_t>(r >> 24);
+                uint8_t pg = static_cast<uint8_t>(g >> 24);
+                uint8_t pb = static_cast<uint8_t>(b >> 24);
+                uint8_t pa = static_cast<uint8_t>(a >> 24);
+                storage->localData[0] = pb;
+                storage->localData[1] = pg;
+                storage->localData[2] = pr;
+                storage->localData[3] = pa;
+                storage->mappedData = storage->localData.data();
+
+                ShmBuffer buf;
+                buf.bufferId = bufId;
+                buf.storage = storage;
+                buf.offset = 0;
+                buf.width = 1;
+                buf.height = 1;
+                buf.stride = 4;
+                buf.format = 0; // ARGB8888
+                client.buffers[bufId] = buf;
+            }
+            return;
+        }
+
+        // 17. wp_viewporter requests
+        if (client.viewporterId > 0 && objId == client.viewporterId) {
+            if (opcode == 0) {
+                client.viewporterId = 0;
+            } else if (opcode == 1) {
+                // get_viewport(new_id id, surface)
+                uint32_t vpId = reader.readUint32();
+                [[maybe_unused]] uint32_t sId = reader.readUint32();
+                client.viewports.insert(vpId);
+            }
+            return;
+        }
+
+        if (client.viewports.find(objId) != client.viewports.end()) {
+            if (opcode == 0) {
+                client.viewports.erase(objId);
+            }
+            return;
+        }
+
+        // 18. zwp_pointer_constraints_v1 requests
+        if (client.pointerConstraintsId > 0 && objId == client.pointerConstraintsId) {
+            if (opcode == 0) {
+                client.pointerConstraintsId = 0;
+            } else if (opcode == 1) {
+                // lock_pointer(new_id id, surface, seat, region, lifetime)
+                uint32_t lockId = reader.readUint32();
+                client.lockedPointers.insert(lockId);
+                WaylandMessageWriter lk(lockId, 0); // locked event
+                sendPacket(client.fd, lk);
+            } else if (opcode == 2) {
+                // confine_pointer(new_id id, surface, seat, region, lifetime)
+                uint32_t confId = reader.readUint32();
+                client.confinedPointers.insert(confId);
+                WaylandMessageWriter cf(confId, 0); // confined event
+                sendPacket(client.fd, cf);
+            }
+            return;
+        }
+
+        if (client.lockedPointers.find(objId) != client.lockedPointers.end()) {
+            if (opcode == 0) {
+                client.lockedPointers.erase(objId);
+            }
+            return;
+        }
+
+        if (client.confinedPointers.find(objId) != client.confinedPointers.end()) {
+            if (opcode == 0) {
+                client.confinedPointers.erase(objId);
+            }
+            return;
+        }
+
+        // 19. wp_presentation requests
+        if (client.presentationId > 0 && objId == client.presentationId) {
+            if (opcode == 0) {
+                client.presentationId = 0;
+            } else if (opcode == 1) {
+                // feedback(surface, callback_id)
+                uint32_t surfaceId = reader.readUint32();
+                uint32_t cbId = reader.readUint32();
+                auto sIt = client.surfaces.find(surfaceId);
+                if (sIt != client.surfaces.end()) {
+                    sIt->second.presentationFeedbacks.push_back(cbId);
+                } else {
+                    struct timespec ts;
+                    clock_gettime(CLOCK_MONOTONIC, &ts);
+                    uint32_t tv_sec_hi = static_cast<uint32_t>(static_cast<uint64_t>(ts.tv_sec) >> 32);
+                    uint32_t tv_sec_lo = static_cast<uint32_t>(ts.tv_sec & 0xFFFFFFFF);
+                    uint32_t tv_nsec = static_cast<uint32_t>(ts.tv_nsec);
+                    uint32_t refresh_nsec = 1000000000 / 144;
+
+                    WaylandMessageWriter p(cbId, 1);
+                    p.putUint32(tv_sec_hi);
+                    p.putUint32(tv_sec_lo);
+                    p.putUint32(tv_nsec);
+                    p.putUint32(refresh_nsec);
+                    p.putUint32(0);
+                    p.putUint32(static_cast<uint32_t>(m_frameCount));
+                    p.putUint32(0x1);
+                    sendPacket(client.fd, p);
+                }
+            }
+            return;
+        }
+
+        // 20. xdg_toplevel_icon_manager_v1 & zwp_keyboard_shortcuts_inhibit_manager_v1
+        if (client.toplevelIconManagerId > 0 && objId == client.toplevelIconManagerId) {
+            if (opcode == 0) {
+                client.toplevelIconManagerId = 0;
+            }
+            return;
+        }
+
+        if (client.shortcutsInhibitManagerId > 0 && objId == client.shortcutsInhibitManagerId) {
+            if (opcode == 0) {
+                client.shortcutsInhibitManagerId = 0;
             }
             return;
         }

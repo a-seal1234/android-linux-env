@@ -207,10 +207,17 @@ fun StackConfiguratorScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         SelectableCard(
-                            title = "Hyprland (Dynamic Tiling)",
+                            title = "Hyprland",
                             subtitle = "Hardware-accelerated Wayland desktop with dynamic tiling, animations, and tablet-v2 support.",
                             selected = state.profile.compositor.type == StackProfile.CompositorType.HYPRLAND,
                             onClick = { viewModel.updateCompositor(StackProfile.CompositorType.HYPRLAND) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        SelectableCard(
+                            title = "KDE Plasma 6",
+                            subtitle = "Full-featured modern desktop with KWin Wayland, Dolphin, Konsole, and Plasma panel.",
+                            selected = state.profile.compositor.type == StackProfile.CompositorType.PLASMA,
+                            onClick = { viewModel.updateCompositor(StackProfile.CompositorType.PLASMA) },
                             modifier = Modifier.weight(1f)
                         )
                         SelectableCard(

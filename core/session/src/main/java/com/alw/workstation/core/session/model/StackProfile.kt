@@ -246,7 +246,11 @@ data class StackProfile(
                 compositor = CompositorConfig(
                     type = CompositorType.valueOf(compObj.getString("type").uppercase()),
                     execCommand = compObj.getString("execCommand"),
-                    configMode = ConfigMode.valueOf(compObj.optString("configMode", "WRAP_AND_OVERRIDE").uppercase()),
+                    configMode = try {
+                        ConfigMode.valueOf(compObj.optString("configMode", "WRAP_AND_OVERRIDE").uppercase())
+                    } catch (_: IllegalArgumentException) {
+                        ConfigMode.DIRECT
+                    },
                     userConfigPath = compObj.optString("userConfigPath").takeIf { it.isNotBlank() },
                     sessionConfigPath = compObj.optString("sessionConfigPath", "/tmp/android-session.conf"),
                     extraArgs = extraArgsList
@@ -372,6 +376,45 @@ data class StackProfile(
                 input = InputConfig(
                     rebindCapsToSuper = false
                 )
+            )
+        }
+
+        fun kdePlasmaProfile(): StackProfile {
+            return StackProfile(
+                id = "arch-kde-plasma",
+                name = "KDE Plasma 6 (Wayland + Turnip KGSL)",
+                distro = DistroConfig(
+                    rootfsId = "archlinux-default",
+                    architecture = "aarch64",
+                    defaultUser = "alw",
+                    shell = "/bin/bash"
+                ),
+                compositor = CompositorConfig(
+                    type = CompositorType.PLASMA,
+                    execCommand = "startplasma-wayland",
+                    configMode = ConfigMode.DIRECT,
+                    extraArgs = emptyList()
+                ),
+                gpu = GpuConfig(
+                    driverMode = DriverMode.TURNIP_KGSL,
+                    externalDriverId = "turnip-mesa-25.0.0-adreno825",
+                    kgslNode = "/dev/kgsl-3d0",
+                    mesaLoaderOverride = "zink",
+                    tuDebugNoConform = true,
+                    environmentOverrides = mapOf(
+                        "TU_DEBUG" to "noconform",
+                        "MESA_VK_WSI_PRESENT_MODE" to "mailbox"
+                    )
+                ),
+                display = DisplayConfig(
+                    resolutionMode = ResolutionMode.NATIVE,
+                    customWidth = 3200,
+                    customHeight = 2136,
+                    scaleFactor = 1.75f,
+                    refreshRateHz = 144
+                ),
+                storage = StorageConfig(),
+                input = InputConfig()
             )
         }
     }

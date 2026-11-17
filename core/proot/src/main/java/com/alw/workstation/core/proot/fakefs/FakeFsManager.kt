@@ -95,6 +95,35 @@ class FakeFsManager(
             } catch (_: Throwable) {}
         }
 
+        // Bridge sockets into run/user/1000
+        val runUser1000Pulse = File(runUser1000Dir, "pulse")
+        if (!runUser1000Pulse.exists()) {
+            try {
+                java.nio.file.Files.createSymbolicLink(
+                    runUser1000Pulse.toPath(),
+                    java.nio.file.Paths.get("/tmp/runtime-alw/pulse")
+                )
+            } catch (_: Throwable) {}
+        }
+        val runUser1000W0 = File(runUser1000Dir, "wayland-0")
+        if (!runUser1000W0.exists()) {
+            try {
+                java.nio.file.Files.createSymbolicLink(
+                    runUser1000W0.toPath(),
+                    java.nio.file.Paths.get("/tmp/runtime-alw/wayland-0")
+                )
+            } catch (_: Throwable) {}
+        }
+        val runUser1000W1 = File(runUser1000Dir, "wayland-1")
+        if (!runUser1000W1.exists()) {
+            try {
+                java.nio.file.Files.createSymbolicLink(
+                    runUser1000W1.toPath(),
+                    java.nio.file.Paths.get("/tmp/runtime-alw/wayland-1")
+                )
+            } catch (_: Throwable) {}
+        }
+
         // Materialize network configuration files
         etcResolvConf.parentFile?.mkdirs()
         etcResolvConf.writeText("nameserver 1.1.1.1\nnameserver 8.8.8.8\n")

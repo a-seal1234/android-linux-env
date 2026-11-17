@@ -20,6 +20,11 @@ object EnvironmentGenerator {
         env["LOGNAME"] = profile.distro.defaultUser
         env["SHELL"] = profile.distro.shell
         env["PATH"] = "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin"
+        env["UV_USE_IO_URING"] = "0"
+        env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
+        // Android 15+ app seccomp policies trap rseq (SECCOMP_RET_TRAP -> SIGSYS);
+        // a blocked/ignored SIGSYS degrades to ENOSYS, so disable glibc rseq registration
+        env["GLIBC_TUNABLES"] = "glibc.pthread.rseq=0"
 
         // 2. Wayland runtime environment & nested compositor backend
         env["XDG_RUNTIME_DIR"] = "/tmp/runtime-alw"
@@ -64,20 +69,14 @@ object EnvironmentGenerator {
                 val icdPath = "/opt/drivers/turnip/active/freedreno_icd.aarch64.json"
                 env["VK_ICD_FILENAMES"] = icdPath
                 env["VK_DRIVER_FILES"] = icdPath
-                env["LIBGL_DRIVERS_PATH"] = "/opt/drivers/turnip/active/lib/dri"
-                env["LD_LIBRARY_PATH"] = "/opt/drivers/turnip/active/lib"
                 env["MESA_LOADER_DRIVER_OVERRIDE"] = "zink"
                 env["GALLIUM_DRIVER"] = "zink"
-                if (profile.gpu.tuDebugNoConform) {
-                    env["TU_DEBUG"] = "noconform"
-                }
+                env["TU_DEBUG"] = "noconform"
             }
             StackProfile.DriverMode.ADRENO_PROPRIETARY_ZINK -> {
                 val icdPath = "/opt/drivers/turnip/active/adreno_icd.aarch64.json"
                 env["VK_ICD_FILENAMES"] = icdPath
                 env["VK_DRIVER_FILES"] = icdPath
-                env["LIBGL_DRIVERS_PATH"] = "/opt/drivers/turnip/active/lib/dri"
-                env["LD_LIBRARY_PATH"] = "/opt/drivers/turnip/active/lib"
                 env["MESA_LOADER_DRIVER_OVERRIDE"] = "zink"
                 env["GALLIUM_DRIVER"] = "zink"
             }
@@ -97,7 +96,7 @@ object EnvironmentGenerator {
         }
 
         // 6. Low-Latency Audio Subsystem (PulseAudio & PipeWire)
-        env["PULSE_SERVER"] = "unix:/run/user/1000/pulse/native unix:/tmp/runtime-alw/pulse/native"
+        env["PULSE_SERVER"] = "unix:/run/user/1000/pulse/native"
         env["PIPEWIRE_RUNTIME_DIR"] = "/tmp/runtime-alw"
 
         // 7. x86_64 Emulation & GPU Thunking environment (FEX-Emu / box64)

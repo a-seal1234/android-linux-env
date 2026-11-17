@@ -102,4 +102,14 @@ class StackProfileTest {
         assertEquals("fex-2412", parsed.emulation.overlayVersion)
         assertEquals("/opt/fex/bin/custom", parsed.emulation.customInterpreterPath)
     }
+
+    @Test
+    fun testKdePlasmaProfile() {
+        val profile = StackProfile.kdePlasmaProfile()
+        assertEquals("arch-kde-plasma", profile.id)
+        assertEquals(StackProfile.CompositorType.PLASMA, profile.compositor.type)
+        assertEquals("startplasma-wayland", profile.compositor.execCommand)
+        assertEquals(StackProfile.DriverMode.TURNIP_KGSL, profile.gpu.driverMode)
+        assertEquals("zink", profile.gpu.mesaLoaderOverride)
+    }
 }

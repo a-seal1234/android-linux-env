@@ -53,6 +53,18 @@ object PtyBridge {
         rows: Int
     ): IntArray?
 
+    @JvmStatic
+    private external fun nativeWaitPid(pid: Int, noHang: Boolean): Int
+
+    /**
+     * Waits for child process termination or queries its current state.
+     * Returns: exitCode (>= 0), -3 if still running with noHang=true, -1 on error, -2 if no child.
+     */
+    fun waitPid(pid: Int, noHang: Boolean = false): Int {
+        if (!isNativeLoaded) return 0
+        return nativeWaitPid(pid, noHang)
+    }
+
     /**
      * Creates an open PTY master/slave pair.
      */

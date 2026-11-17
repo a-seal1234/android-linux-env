@@ -107,16 +107,23 @@ class ProotRunner(
         if (!sessionPulseDir.exists()) {
             sessionPulseDir.mkdirs()
         }
-        args.add("-b")
-        args.add("${sessionRuntimeDir.absolutePath}:/tmp/runtime-alw")
-
-        // Also bind-mount to /run/user/1000 for standard Linux client compatibility
-        val guestRunUser1000 = File(rootfsDir, "run/user/1000")
-        if (!guestRunUser1000.exists()) {
-            guestRunUser1000.mkdirs()
+        val isInsideFakefsTmp = try {
+            sessionRuntimeDir.canonicalPath.startsWith(fakeFsManager.tmpDir.canonicalPath)
+        } catch (_: Throwable) {
+            sessionRuntimeDir.absolutePath.startsWith(fakeFsManager.tmpDir.absolutePath)
         }
-        args.add("-b")
-        args.add("${sessionRuntimeDir.absolutePath}:/run/user/1000")
+        if (!isInsideFakefsTmp) {
+            args.add("-b")
+            args.add("${sessionRuntimeDir.absolutePath}:/tmp/runtime-alw")
+
+            // Also bind-mount to /run/user/1000 for standard Linux client compatibility
+            val guestRunUser1000 = File(rootfsDir, "run/user/1000")
+            if (!guestRunUser1000.exists()) {
+                guestRunUser1000.mkdirs()
+            }
+            args.add("-b")
+            args.add("${sessionRuntimeDir.absolutePath}:/run/user/1000")
+        }
 
         // 7. External Mesa Turnip / Adreno driver package mount (shared driver store)
         if (profile.gpu.externalDriverId.isNotBlank() && profile.gpu.externalDriverId != "system-fallback") {
@@ -141,6 +148,11 @@ class ProotRunner(
         // 8. Selective SDCard mount (with Scoped Storage Android/data & obb masking)
         val storageMounts = storageBridge.resolveStorageMounts(profile)
         for (mount in storageMounts) {
+            val gPath = mount.guestPath ?: mount.hostPath
+            val targetDir = File(rootfsDir, gPath.removePrefix("/"))
+            if (!targetDir.exists()) {
+                targetDir.mkdirs()
+            }
             args.add("-b")
             args.add(mount.toCliArg())
         }
@@ -220,7 +232,7 @@ class ProotRunner(
         }
 
         // Wrap compositor sessions in dbus-run-session for clipboard & XDG portal services
-        if (customExecCommand == null) {
+        if (customExecCommand == null && execCmd != "startplasma-wayland" && !execCmd.contains("dbus-run-session")) {
             args.add("dbus-run-session")
             args.add("--")
         }
@@ -230,12 +242,12 @@ class ProotRunner(
         // 13. Runner environment (host side for PRoot binary)
         val runnerEnv = mutableMapOf<String, String>()
         runnerEnv["PROOT_TMP_DIR"] = dirs.prootTmpDir.absolutePath
-        if (File(dirs.loaderPath).exists()) {
-            runnerEnv["PROOT_LOADER"] = dirs.loaderPath
-        }
-        if (File(dirs.nativeLibDir).exists()) {
-            runnerEnv["LD_LIBRARY_PATH"] = dirs.nativeLibDir
-        }
+        runnerEnv["PROOT_LOADER"] = dirs.loaderPath
+        runnerEnv["PROOT_NO_SECCOMP"] = "1"
+        // Must be present in the host-side env as well: /usr/bin/env itself is a guest glibc
+        // binary whose ld.so would register rseq (SIGSYS under Android 15+ seccomp) before
+        // it ever exports GLIBC_TUNABLES to its children.
+        runnerEnv["GLIBC_TUNABLES"] = "glibc.pthread.rseq=0"
 
         // 14. Resolve execution binary (direct execution if binary is executable, otherwise fallback to linker64 if needed)
         val useLinker = prootBinaryPath.endsWith(".so") && !File(prootBinaryPath).canExecute() && File("/system/bin/linker64").canExecute()
