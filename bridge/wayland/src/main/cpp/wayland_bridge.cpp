@@ -1,5 +1,7 @@
 #include <jni.h>
 #include <android/log.h>
+#include <android/choreographer.h>
+#include <android/looper.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <android/hardware_buffer.h>
@@ -469,6 +471,7 @@ public:
 
         m_running.store(true);
         m_serverThread = std::thread(&WaylandSurfaceServer::eventLoop, this);
+        m_pacingThread = std::thread(&WaylandSurfaceServer::pacingLoop, this);
 
         LOGI("Wayland protocol server started on %s (%dx%d @ scale %.2f)",
              m_socketPath.c_str(), m_width, m_height, m_scale);
@@ -479,6 +482,18 @@ public:
         if (!m_running.exchange(false)) return;
 
         LOGI("Stopping Wayland surface server...");
+        wakePacingThread();
+        if (m_pacingThread.joinable()) {
+            m_pacingThread.join();
+        }
+        if (m_pacingWakeRead >= 0) {
+            close(m_pacingWakeRead);
+            m_pacingWakeRead = -1;
+        }
+        if (m_pacingWakeWrite >= 0) {
+            close(m_pacingWakeWrite);
+            m_pacingWakeWrite = -1;
+        }
         if (m_serverFd >= 0) {
             shutdown(m_serverFd, SHUT_RDWR);
             close(m_serverFd);
@@ -545,6 +560,15 @@ public:
             LOGI("Surface resized to %dx%d", m_width, m_height);
         }
     }
+
+    void setRefreshRate(float hz) {
+        if (hz < 1.0f || hz > 360.0f)
+            return;
+        m_refreshRateHz.store(hz);
+        LOGI("Display refresh rate updated: %.2f Hz", hz);
+    }
+
+    float getRefreshRate() const { return m_refreshRateHz.load(); }
 
     bool isRunning() const { return m_running.load(); }
     int getActiveClientsCount() const { return m_activeClients.load(); }
@@ -907,6 +931,133 @@ public:
     }
 
 private:
+    // --- VSync frame pacing -------------------------------------------------
+    // wl_callback.done must be paced to the host display. Replying synchronously
+    // inside wl_surface.commit makes nested compositors (Aquamarine/Hyprland)
+    // re-arm their timerfd in a 0 ms busy loop; instead the callbacks are queued
+    // and flushed from AChoreographer's hardware VSync callback (60-144 Hz,
+    // whatever HyperOS is currently running) with a refresh-rate timer fallback.
+    static constexpr int PACING_WAKE_IDENT = 0x414c57;
+
+    void queueFrameCallback(int clientFd, uint32_t callbackId) {
+        {
+            std::lock_guard<std::mutex> lock(m_pacingMutex);
+            m_pendingFrameCallbacks.emplace_back(clientFd, callbackId);
+        }
+        wakePacingThread();
+    }
+
+    void wakePacingThread() {
+        int fd = m_pacingWakeWrite;
+        if (fd < 0)
+            return;
+        char byte = 1;
+        ssize_t ignored = write(fd, &byte, 1);
+        (void) ignored;
+    }
+
+    bool hasPendingFrameCallbacks() {
+        std::lock_guard<std::mutex> lock(m_pacingMutex);
+        return !m_pendingFrameCallbacks.empty();
+    }
+
+    static void choreographerFrameCallback(int64_t frameTimeNanos, void* data) {
+        static_cast<WaylandSurfaceServer*>(data)->onVsync(frameTimeNanos);
+    }
+
+    void onVsync(int64_t frameTimeNanos) {
+        m_choreographerFramePosted = false;
+        static std::atomic<int> s_vsyncTicks{0};
+        int tick = s_vsyncTicks.fetch_add(1);
+        if (tick < 5 || tick % 120 == 0)
+            LOGI("VSync tick #%d (frameTime=%lld ns)", tick, (long long) frameTimeNanos);
+        flushFrameCallbacks(frameTimeNanos);
+        if (hasPendingFrameCallbacks())
+            postChoreographerFrame();
+    }
+
+    void postChoreographerFrame() {
+        if (m_choreographer == nullptr || m_choreographerFramePosted)
+            return;
+        m_choreographerFramePosted = true;
+        AChoreographer_postFrameCallback64(m_choreographer,
+            &WaylandSurfaceServer::choreographerFrameCallback, this);
+    }
+
+    void flushFrameCallbacks(int64_t frameTimeNanos) {
+        std::vector<std::pair<int, uint32_t>> pending;
+        {
+            std::lock_guard<std::mutex> lock(m_pacingMutex);
+            pending.swap(m_pendingFrameCallbacks);
+        }
+        if (pending.empty())
+            return;
+        LOGI("Flushing %zu frame callback(s) at VSync", pending.size());
+
+        uint32_t timestampMs = frameTimeNanos > 0
+            ? static_cast<uint32_t>(frameTimeNanos / 1000000LL)
+            : nowMillis();
+
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        for (const auto& cb : pending) {
+            if (m_clients.find(cb.first) == m_clients.end()) {
+                LOGW("Frame callback %u dropped: client fd %d gone", cb.second, cb.first);
+                continue;
+            }
+            WaylandMessageWriter done(cb.second, 0); // wl_callback.done
+            done.putUint32(timestampMs);
+            sendPacket(cb.first, done);
+            LOGI("Frame callback %u -> fd %d (ts=%u)", cb.second, cb.first, timestampMs);
+        }
+    }
+
+    void pacingLoop() {
+        int wakeFds[2] = {-1, -1};
+        if (pipe2(wakeFds, O_NONBLOCK | O_CLOEXEC) < 0) {
+            LOGE("Frame pacing: pipe2 failed: %s", strerror(errno));
+            return;
+        }
+        m_pacingWakeRead = wakeFds[0];
+        m_pacingWakeWrite = wakeFds[1];
+
+        ALooper* looper = ALooper_prepare(0);
+        if (looper != nullptr)
+            ALooper_addFd(looper, m_pacingWakeRead, PACING_WAKE_IDENT,
+                          ALOOPER_EVENT_INPUT, nullptr, nullptr);
+
+        m_choreographer = AChoreographer_getInstance();
+        LOGI("Frame pacing thread started (AChoreographer %s, %.1f Hz fallback)",
+             m_choreographer != nullptr ? "available" : "unavailable",
+             m_refreshRateHz.load());
+
+        while (m_running.load()) {
+            float hz = m_refreshRateHz.load();
+            if (hz < 1.0f) hz = 60.0f;
+            int frameIntervalMs = std::max(1, static_cast<int>(1000.0f / hz));
+
+            int timeoutMs = 250;
+            if (hasPendingFrameCallbacks())
+                timeoutMs = frameIntervalMs * 2; // dead-man switch if VSync callbacks pause
+
+            int ident = ALooper_pollOnce(timeoutMs, nullptr, nullptr, nullptr);
+            if (ident == PACING_WAKE_IDENT) {
+                char drain[128];
+                while (read(m_pacingWakeRead, drain, sizeof(drain)) > 0) { }
+            }
+            if (!m_running.load())
+                break;
+
+            if (!hasPendingFrameCallbacks())
+                continue;
+
+            if (m_choreographer != nullptr)
+                postChoreographerFrame();
+
+            if (ident == ALOOPER_POLL_TIMEOUT)
+                flushFrameCallbacks(0); // timer fallback paced at the live refresh rate
+        }
+    }
+
     void initGlobals() {
         m_globals.clear();
         m_globals.push_back({1, "wl_compositor", 6});
@@ -925,7 +1076,10 @@ private:
         // render node) before they will use any compositing at all, so these optional globals
         // are not the cause of their refusal to start. wp_presentation is required by KWin's
         // nested backend; xdg_toplevel_icon_manager_v1 was bisected harmless and is kept.
-        m_globals.push_back({13, "wp_presentation", 1});
+        // NOTE (TASK-024): wp_presentation is deliberately NOT announced while the bridge
+        // paces frames itself via AChoreographer: presentation-clock skew made Aquamarine
+        // re-arm its frame timer in a busy loop. Re-enable once feedback timing is exact.
+        // m_globals.push_back({13, "wp_presentation", 1});
         m_globals.push_back({14, "xdg_toplevel_icon_manager_v1", 1});
         m_globals.push_back({15, "zwp_keyboard_shortcuts_inhibit_manager_v1", 1});
         m_globals.push_back({16, "zwp_linux_dmabuf_v1", 4});
@@ -969,9 +1123,34 @@ private:
         return n;
     }
 
+    // Sends a complete Wayland message, retrying on EAGAIN. The client socket is
+    // non-blocking; dropping a wl_callback.done/wl_buffer.release packet would
+    // permanently stall the peer's render loop, so writability is polled briefly.
     void sendPacket(int clientFd, const WaylandMessageWriter& writer) {
-        if (clientFd >= 0 && !writer.data().empty()) {
-            send(clientFd, writer.data().data(), writer.data().size(), MSG_NOSIGNAL);
+        if (clientFd < 0 || writer.data().empty())
+            return;
+
+        const uint8_t* data = writer.data().data();
+        size_t remaining = writer.data().size();
+        while (remaining > 0) {
+            ssize_t written = send(clientFd, data, remaining, MSG_NOSIGNAL | MSG_DONTWAIT);
+            if (written > 0) {
+                data += written;
+                remaining -= static_cast<size_t>(written);
+                continue;
+            }
+            if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                struct pollfd pfd;
+                pfd.fd = clientFd;
+                pfd.events = POLLOUT;
+                pfd.revents = 0;
+                if (poll(&pfd, 1, 200) <= 0) {
+                    LOGW("Wayland send stalled (fd %d, %zu bytes dropped)", clientFd, remaining);
+                    return;
+                }
+                continue;
+            }
+            return; // EPIPE / EBADF: client is gone
         }
     }
 
@@ -1296,7 +1475,7 @@ private:
                     mode.putUint32(0x1 | 0x2); // current | preferred
                     mode.putInt32(m_width);
                     mode.putInt32(m_height);
-                    mode.putInt32(144000); // 144Hz
+                    mode.putInt32(static_cast<int32_t>(getRefreshRate() * 1000.0f));
                     sendPacket(client.fd, mode);
 
                     // Send scale factor
@@ -1610,13 +1789,11 @@ private:
                     client.activeSurfaceId = objId;
                 }
 
-                // Send frame done to drive client presentation loop
-                uint32_t now = nowMillis();
+                // Queue frame callbacks; they are flushed on the host VSync tick so the
+                // client's render loop is paced by the display instead of spinning.
                 for (uint32_t cb : surface.frameCallbacks) {
-                    WaylandMessageWriter frameDone(cb, 0); // wl_callback.done
-                    frameDone.putUint32(now);
-                    sendPacket(client.fd, frameDone);
-                    LOGI("wl_surface %u: wl_callback.done sent to callback %u", surface.surfaceId, cb);
+                    LOGI("wl_surface %u: frame callback %u queued for VSync", surface.surfaceId, cb);
+                    queueFrameCallback(client.fd, cb);
                 }
                 surface.frameCallbacks.clear();
 
@@ -1627,7 +1804,7 @@ private:
                     uint32_t tv_sec_hi = static_cast<uint32_t>(static_cast<uint64_t>(ts.tv_sec) >> 32);
                     uint32_t tv_sec_lo = static_cast<uint32_t>(ts.tv_sec & 0xFFFFFFFF);
                     uint32_t tv_nsec = static_cast<uint32_t>(ts.tv_nsec);
-                    uint32_t refresh_nsec = 1000000000 / 144; // 144Hz (~6.94ms)
+                    uint32_t refresh_nsec = static_cast<uint32_t>(1000000000.0f / std::max(1.0f, getRefreshRate()));
 
                     for (uint32_t fb : surface.presentationFeedbacks) {
                         WaylandMessageWriter p(fb, 1); // presented
@@ -2171,6 +2348,15 @@ private:
     std::thread m_serverThread;
     std::recursive_mutex m_mutex;
 
+    std::atomic<float> m_refreshRateHz{60.0f};
+    std::thread m_pacingThread;
+    int m_pacingWakeRead{-1};
+    int m_pacingWakeWrite{-1};
+    std::mutex m_pacingMutex;
+    std::vector<std::pair<int, uint32_t>> m_pendingFrameCallbacks;
+    AChoreographer* m_choreographer{nullptr};
+    bool m_choreographerFramePosted{false};
+
     ANativeWindow* m_nativeWindow;
     int m_width;
     int m_height;
@@ -2240,6 +2426,17 @@ Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSetSurface(
     } else {
         getServer()->setNativeWindow(nullptr);
     }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSetRefreshRate(
+    JNIEnv* env,
+    jobject thiz,
+    jfloat hz
+) {
+    (void) env;
+    (void) thiz;
+    getServer()->setRefreshRate(hz);
 }
 
 extern "C" JNIEXPORT void JNICALL

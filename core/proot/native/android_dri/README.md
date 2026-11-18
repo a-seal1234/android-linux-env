@@ -17,7 +17,9 @@ This PRoot extension makes the node usable:
   (`MODE_GETRESOURCES`/`GETCRTC`/`SETCRTC`/`ADDFB`/`ADDFB2`/`RMFB`,
   `SET_MASTER`/`DROP_MASTER`); `PRIME_HANDLE_TO_FD` chains a real
   `DMA_HEAP_IOCTL_ALLOC` **in the tracee** so the dma-buf fd lands in the
-  tracee's fd table. Pending chained allocations are tracked **per tracee**
+  tracee's fd table. `mmap()` on the virtual node at a MAP_DUMB offset is
+  rewritten to the BO's backing fd so CPU renderers write into the exported
+  buffer. Pending chained allocations are tracked **per tracee**
   (compositors export dma-bufs from multiple threads concurrently). Unknown
   ioctls pass through untouched.
 

@@ -1,0 +1,4 @@
+dumb handle=1 pitch=256 size=16384
+map offset=0x10000
+prime fd=5
+DUMB_SHARE_OK

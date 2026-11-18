@@ -1,8 +1,10 @@
 package com.alw.workstation.bridge.wayland
 
 import android.content.Context
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.util.AttributeSet
+import android.view.Display
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.PointerIcon
@@ -29,6 +31,20 @@ class WaylandSurfaceView @JvmOverloads constructor(
             value?.inputProfile = inputProfile
             applyInputProfile(inputProfile)
         }
+
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+        override fun onDisplayRemoved(displayId: Int) = Unit
+        override fun onDisplayChanged(displayId: Int) {
+            val display = displayManager?.getDisplay(displayId) ?: return
+            if (display.displayId == this@WaylandSurfaceView.display?.displayId) {
+                pushRefreshRate(display)
+            }
+        }
+    }
+
+    private val displayManager: DisplayManager?
+        get() = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
 
     var inputProfile: InputProfile = InputProfile.CREATIVE_PEN
         set(value) {
@@ -63,6 +79,28 @@ class WaylandSurfaceView @JvmOverloads constructor(
         }
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        displayManager?.registerDisplayListener(displayListener, null)
+        display?.let { pushRefreshRate(it) }
+    }
+
+    override fun onDetachedFromWindow() {
+        displayManager?.unregisterDisplayListener(displayListener)
+        super.onDetachedFromWindow()
+    }
+
+    private fun pushRefreshRate(display: Display, applySurfaceFrameRate: Boolean = false) {
+        val hz = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display.refreshRate else 60f
+        serverManager?.setRefreshRate(hz)
+        if (!applySurfaceFrameRate || !holder.surface.isValid) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            runCatching {
+                holder.surface.setFrameRate(hz, android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+            }
+        }
+    }
+
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
         if (hasWindowFocus) {
@@ -71,9 +109,7 @@ class WaylandSurfaceView @JvmOverloads constructor(
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            holder.surface.setFrameRate(144.0f, android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
-        }
+        display?.let { pushRefreshRate(it, applySurfaceFrameRate = true) }
         serverManager?.attachSurface(holder.surface)
         if (hasWindowFocus()) {
             applyInputProfile(inputProfile)
@@ -81,9 +117,7 @@ class WaylandSurfaceView @JvmOverloads constructor(
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            holder.surface.setFrameRate(144.0f, android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
-        }
+        display?.let { pushRefreshRate(it, applySurfaceFrameRate = true) }
         serverManager?.resizeSurface(width, height)
         serverManager?.attachSurface(holder.surface)
     }

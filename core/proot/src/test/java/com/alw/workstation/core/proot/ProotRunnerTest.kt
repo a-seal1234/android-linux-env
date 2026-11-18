@@ -71,7 +71,7 @@ class ProotRunnerTest {
         // Check compositor exec with D-Bus session wrapping
         assertTrue(cmd.arguments.contains("dbus-run-session"))
         assertTrue(cmd.arguments.contains("--"))
-        assertTrue(cmd.arguments.contains("Hyprland"))
+        assertTrue(cmd.arguments.contains("start-hyprland"))
         assertTrue(cmd.arguments.contains("-c"))
         assertTrue(cmd.arguments.contains("/tmp/android-session.conf"))
     }

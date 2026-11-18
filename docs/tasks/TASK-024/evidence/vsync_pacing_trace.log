@@ -1,0 +1,12 @@
+11-18 23:32:57.136 I/ALW::WaylandBridgeNative( 4314): Frame pacing thread started (AChoreographer available, 60.0 Hz fallback)
+11-18 23:32:57.203 I/ALW::WaylandBridgeNative( 4314): Display refresh rate updated: 120.00 Hz
+11-18 23:32:57.225 I/ALW::WaylandBridgeNative( 4314): Display refresh rate updated: 120.00 Hz
+11-18 23:32:57.226 I/ALW::WaylandBridgeNative( 4314): Display refresh rate updated: 120.00 Hz
+11-18 23:33:00.526 I/ALW::WaylandBridgeNative( 4314): Blitted frame #1: 3200x2136 (stride=12800, fmt=1) -> ANativeWindow 3200x2136 (stride=3200)
+11-18 23:33:00.549 I/ALW::WaylandBridgeNative( 4314): wl_buffer 18: release sent (dmabuf)
+11-18 23:33:00.549 I/ALW::WaylandBridgeNative( 4314): wl_surface 13: frame callback 19 queued for VSync
+11-18 23:33:00.574 I/ALW::WaylandBridgeNative( 4314): wl_buffer 18: release sent (dmabuf)
+11-18 23:33:00.585 I/ALW::WaylandBridgeNative( 4314): Display refresh rate updated: 60.00 Hz
+11-18 23:33:00.601 I/ALW::WaylandBridgeNative( 4314): Flushing 1 frame callback(s) at VSync
+11-18 23:33:00.601 I/ALW::WaylandBridgeNative( 4314): Frame callback 19 -> fd 4 (ts=834890941)
+11-18 23:33:00.972 I/ALW::WaylandBridgeNative( 4314): wl_buffer 18: release sent (dmabuf)

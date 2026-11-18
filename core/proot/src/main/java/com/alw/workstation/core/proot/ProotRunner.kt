@@ -251,10 +251,18 @@ class ProotRunner(
         }
 
         // 12. Command to execute (wrapped with dbus-run-session for Wayland compositors)
-        val execCmd = customExecCommand ?: profile.compositor.execCommand
+        // Hyprland >= 0.57 requires the start-hyprland wrapper for its runtime instance
+        // directory + IPC socket; plain "Hyprland" is used by older persisted profiles.
+        val execCmd = when {
+            customExecCommand != null -> customExecCommand
+            profile.compositor.execCommand == "Hyprland" &&
+                profile.compositor.type == StackProfile.CompositorType.HYPRLAND -> "start-hyprland"
+            else -> profile.compositor.execCommand
+        }
         val execArgs = (customArgs ?: profile.compositor.extraArgs).toMutableList()
 
-        if ((execCmd == "Hyprland" || profile.compositor.type == StackProfile.CompositorType.HYPRLAND) &&
+        if ((execCmd == "Hyprland" || execCmd == "start-hyprland" ||
+                profile.compositor.type == StackProfile.CompositorType.HYPRLAND) &&
             !execArgs.contains("--i-am-really-stupid")
         ) {
             execArgs.add("--i-am-really-stupid")
@@ -266,6 +274,10 @@ class ProotRunner(
             args.add("--")
         }
         args.add(execCmd)
+        if (execCmd == "start-hyprland") {
+            // Everything after "--" is forwarded verbatim to Hyprland.
+            args.add("--")
+        }
         args.addAll(execArgs)
 
         // 13. Runner environment (host side for PRoot binary)

@@ -207,6 +207,7 @@ typedef struct {
 typedef struct {
 	pid_t pid;
 	int fd;            /* owning virtual DRM fd */
+	int bo_fd;         /* real dma_heap buffer in the tracee's fd table (-1 = none) */
 	uint32_t handle;
 	uint32_t width;
 	uint32_t height;
@@ -225,37 +226,56 @@ static pid_t s_pendingOpenPid = 0;
 static pid_t s_pendingStatPid = 0;
 static int s_pendingStatKind = 0;
 
-/* Pending PRIME_HANDLE_TO_FD per tracee/thread: chained DMA_HEAP_IOCTL_ALLOC.
- * Hyprland exports dma-bufs from multiple threads concurrently, so this state
- * must be per-pid (a single global slot mis-associates chained completions and
- * wedges the tracer). */
+/* Pending chained syscalls per tracee/thread. Hyprland allocates and exports
+ * dma-bufs from several threads concurrently, so this state must be per-pid (a
+ * single global slot mis-associates chained completions and wedges the tracer).
+ *
+ * kind: 1 = dumb-buffer DMA_HEAP_IOCTL_ALLOC (handle owns a real bo_fd)
+ *       2 = PRIME export fallback allocation
+ *       3 = PRIME export duplicate of an existing bo_fd
+ *       4 = close of a released bo_fd (no completion handling) */
 #define MAX_PRIME_PENDING 64
 typedef struct {
 	pid_t pid;
+	int kind;
 	word_t arg;
 	word_t scratch;
 	uint32_t handle;
 	bool active;
-} PrimePending;
+} ChainPending;
 
-static PrimePending s_primePending[MAX_PRIME_PENDING];
+static ChainPending s_chainPending[MAX_PRIME_PENDING];
 
-static PrimePending *prime_state_for(pid_t pid, bool create)
+static ChainPending *chain_state_for(pid_t pid, bool create)
 {
 	size_t i;
-	PrimePending *free_slot = NULL;
+	ChainPending *free_slot = NULL;
 
 	for (i = 0; i < MAX_PRIME_PENDING; i++) {
-		if (s_primePending[i].active && s_primePending[i].pid == pid)
-			return &s_primePending[i];
-		if (!s_primePending[i].active && free_slot == NULL)
-			free_slot = &s_primePending[i];
+		if (s_chainPending[i].active && s_chainPending[i].pid == pid)
+			return &s_chainPending[i];
+		if (!s_chainPending[i].active && free_slot == NULL)
+			free_slot = &s_chainPending[i];
 	}
 	if (!create || free_slot == NULL)
 		return NULL;
 	memset(free_slot, 0, sizeof(*free_slot));
 	free_slot->pid = pid;
 	return free_slot;
+}
+
+static ChainPending *chain_state_alloc(pid_t pid, int kind, uint32_t handle,
+				       word_t arg, word_t scratch)
+{
+	ChainPending *pending = chain_state_for(pid, true);
+	if (pending == NULL)
+		return NULL;
+	pending->kind = kind;
+	pending->handle = handle;
+	pending->arg = arg;
+	pending->scratch = scratch;
+	pending->active = true;
+	return pending;
 }
 
 static bool is_dri_path(const char *path)
@@ -345,6 +365,7 @@ static DriBoEntry *add_bo(pid_t pid, int fd, uint32_t handle,
 	DriBoEntry *bo = &s_driBos[s_driBoCount++];
 	bo->pid = pid;
 	bo->fd = fd;
+	bo->bo_fd = -1;
 	bo->handle = handle;
 	bo->width = width;
 	bo->height = height;
@@ -453,51 +474,116 @@ static void emulate_ioctl(Tracee *tracee, int fd, unsigned long request, word_t 
 		if (arg != 0 && read_data(tracee, &dumb, arg, sizeof(*&dumb)) >= 0
 		    && dumb.width > 0 && dumb.height > 0) {
 			uint32_t bpp = dumb.bpp != 0 ? dumb.bpp : 32;
+			word_t sp, scratch;
+			struct dma_heap_allocation_data alloc;
+
 			dumb.pitch = dumb.width * bpp / 8;
 			dumb.size = (uint64_t) dumb.pitch * dumb.height;
 			dumb.handle = s_nextHandle++;
 			add_bo(tracee->pid, fd, dumb.handle, dumb.width, dumb.height, bpp, dumb.size);
 			write_data(tracee, arg, &dumb, sizeof(*&dumb));
-			VERBOSE(tracee, 2, "android_dri: create_dumb %ux%u bpp=%u handle=%u size=%llu",
+
+			/* The dumb buffer must own a real dma_heap buffer up-front so the
+			 * subsequent mmap() (kms_swrast's render target) and any PRIME export
+			 * share the same memory. */
+			sp = peek_reg(tracee, ORIGINAL, STACK_POINTER);
+			scratch = (sp - PRIME_SCRATCH_BACKOFF) & ~(word_t) 15;
+			memset(&alloc, 0, sizeof(alloc));
+			alloc.len = dumb.size;
+			alloc.fd_flags = O_RDWR | O_CLOEXEC;
+			if (write_data(tracee, scratch, &alloc, sizeof(alloc)) < 0)
+				return;
+
+			if (register_chained_syscall(tracee, PR_ioctl,
+					(word_t) fd, (word_t) DMA_HEAP_IOCTL_ALLOC,
+					scratch, 0, 0, 0) < 0) {
+				VERBOSE(tracee, 2, "android_dri: create_dumb chain failed");
+				poke_reg(tracee, SYSARG_RESULT, (word_t) -ENOMEM);
+				return;
+			}
+			force_chain_final_result(tracee, 0);
+			if (chain_state_alloc(tracee->pid, 1, dumb.handle, arg, scratch) == NULL) {
+				VERBOSE(tracee, 2, "android_dri: no chain slot for create_dumb");
+				poke_reg(tracee, SYSARG_RESULT, (word_t) -ENOMEM);
+				return;
+			}
+			VERBOSE(tracee, 2, "android_dri: create_dumb %ux%u bpp=%u handle=%u size=%llu (heap alloc chained)",
 				dumb.width, dumb.height, bpp, dumb.handle,
 				(unsigned long long) dumb.size);
-			result = 0;
+			return;
 		}
 	} else if (request == DRM_IOCTL_MODE_MAP_DUMB) {
 		struct drm_mode_map_dumb map;
 		if (arg != 0 && read_data(tracee, &map, arg, sizeof(*&map)) >= 0) {
+			DriBoEntry *bo = find_bo(tracee->pid, fd, map.handle);
+			if (bo == NULL) {
+				poke_reg(tracee, SYSARG_RESULT, (word_t) -EINVAL);
+				return;
+			}
+			/* A unique per-handle fake offset; PR_mmap decodes it. */
 			map.pad = 0;
-			map.offset = 0;
+			map.offset = ((uint64_t) map.handle) << 16;
 			write_data(tracee, arg, &map, sizeof(*&map));
+			VERBOSE(tracee, 2, "android_dri: map_dumb handle=%u offset=0x%llx",
+				map.handle, (unsigned long long) map.offset);
 			result = 0;
 		}
 	} else if (request == DRM_IOCTL_MODE_DESTROY_DUMB) {
 		struct drm_mode_destroy_dumb destroy;
 		if (arg != 0 && read_data(tracee, &destroy, arg, sizeof(*&destroy)) >= 0) {
 			DriBoEntry *bo = find_bo(tracee->pid, fd, destroy.handle);
-			if (bo != NULL)
+			if (bo != NULL) {
+				if (bo->bo_fd > 0) {
+					register_chained_syscall(tracee, PR_close, (word_t) bo->bo_fd, 0, 0, 0, 0, 0);
+					force_chain_final_result(tracee, 0);
+					bo->bo_fd = -1;
+				}
 				bo->handle = 0;
+			}
 			result = 0;
 		}
 	} else if (request == DRM_IOCTL_GEM_CLOSE) {
 		struct drm_gem_close close_arg;
 		if (arg != 0 && read_data(tracee, &close_arg, arg, sizeof(*&close_arg)) >= 0) {
 			DriBoEntry *bo = find_bo(tracee->pid, fd, close_arg.handle);
-			if (bo != NULL)
+			if (bo != NULL) {
+				if (bo->bo_fd > 0) {
+					register_chained_syscall(tracee, PR_close, (word_t) bo->bo_fd, 0, 0, 0, 0, 0);
+					force_chain_final_result(tracee, 0);
+					bo->bo_fd = -1;
+				}
 				bo->handle = 0;
+			}
 			result = 0;
 		}
 	} else if (request == DRM_IOCTL_PRIME_HANDLE_TO_FD) {
-		/* Export a dumb buffer as a real DMA-BUF: chain DMA_HEAP_IOCTL_ALLOC in the
-		 * tracee so the freshly allocated fd lands in the tracee's fd table. */
+		/* Export a dumb buffer as a real DMA-BUF. The dumb buffer already owns its
+		 * dma_heap backing fd, so duplicate that fd in the tracee: the exported
+		 * dma-buf then aliases the exact memory kms_swrast renders into. */
 		struct drm_prime_handle prime;
 		if (arg != 0 && read_data(tracee, &prime, arg, sizeof(prime)) >= 0) {
 			DriBoEntry *bo = find_bo(tracee->pid, fd, prime.handle);
+			if (bo != NULL && bo->bo_fd > 0) {
+				if (register_chained_syscall(tracee, PR_dup,
+						(word_t) bo->bo_fd, 0, 0, 0, 0, 0) < 0) {
+					VERBOSE(tracee, 2, "android_dri: PRIME dup chain failed");
+					poke_reg(tracee, SYSARG_RESULT, (word_t) -EINVAL);
+					return;
+				}
+				force_chain_final_result(tracee, 0);
+				if (chain_state_alloc(tracee->pid, 3, prime.handle, arg, 0) == NULL) {
+					VERBOSE(tracee, 2, "android_dri: no chain slot for PRIME dup");
+					poke_reg(tracee, SYSARG_RESULT, (word_t) -EINVAL);
+					return;
+				}
+				VERBOSE(tracee, 2, "android_dri: PRIME export duplicates bo_fd %d for handle %u",
+					bo->bo_fd, prime.handle);
+				return;
+			}
 			if (bo != NULL && bo->size > 0) {
 				word_t sp = peek_reg(tracee, ORIGINAL, STACK_POINTER);
 				word_t scratch = (sp - PRIME_SCRATCH_BACKOFF) & ~(word_t) 15;
 				struct dma_heap_allocation_data alloc;
-				int chainStatus;
 
 				memset(&alloc, 0, sizeof(alloc));
 				alloc.len = bo->size;
@@ -506,27 +592,19 @@ static void emulate_ioctl(Tracee *tracee, int fd, unsigned long request, word_t 
 				if (write_data(tracee, scratch, &alloc, sizeof(alloc)) < 0)
 					return;
 
-				chainStatus = register_chained_syscall(tracee, PR_ioctl,
-					(word_t) fd, (word_t) DMA_HEAP_IOCTL_ALLOC,
-					scratch, 0, 0, 0);
-				if (chainStatus < 0) {
+				if (register_chained_syscall(tracee, PR_ioctl,
+						(word_t) fd, (word_t) DMA_HEAP_IOCTL_ALLOC,
+						scratch, 0, 0, 0) < 0) {
 					VERBOSE(tracee, 2, "android_dri: chained alloc failed to register");
 					poke_reg(tracee, SYSARG_RESULT, (word_t) -EINVAL);
 					return;
 				}
 
 				force_chain_final_result(tracee, 0);
-				{
-					PrimePending *pending = prime_state_for(tracee->pid, true);
-					if (pending == NULL) {
-						VERBOSE(tracee, 2, "android_dri: no PRIME pending slot");
-						poke_reg(tracee, SYSARG_RESULT, (word_t) -EINVAL);
-						return;
-					}
-					pending->arg = arg;
-					pending->scratch = scratch;
-					pending->handle = prime.handle;
-					pending->active = true;
+				if (chain_state_alloc(tracee->pid, 2, prime.handle, arg, scratch) == NULL) {
+					VERBOSE(tracee, 2, "android_dri: no PRIME pending slot");
+					poke_reg(tracee, SYSARG_RESULT, (word_t) -EINVAL);
+					return;
 				}
 				VERBOSE(tracee, 2, "android_dri: chained DMA_HEAP_IOCTL_ALLOC for handle %u (size %llu)",
 					prime.handle, (unsigned long long) bo->size);
@@ -638,6 +716,24 @@ int android_dri_callback(Extension *extension, ExtensionEvent event,
 			}
 		}
 
+		/* dma-buf dumb buffers are mmap'ed through the virtual DRM fd at the fake
+		 * offset returned by MAP_DUMB; redirect to the BO's real heap fd so the
+		 * CPU renderer writes straight into the exported buffer. */
+		if (sysnum == PR_mmap) {
+			int mmapFd = (int) peek_reg(tracee, CURRENT, SYSARG_5);
+			word_t offset = peek_reg(tracee, CURRENT, SYSARG_6);
+			if (offset != 0 && is_dri_fd(tracee->pid, mmapFd)) {
+				uint32_t handle = (uint32_t) (offset >> 16);
+				DriBoEntry *bo = find_bo(tracee->pid, mmapFd, handle);
+				if (bo != NULL && bo->bo_fd > 0) {
+					poke_reg(tracee, SYSARG_5, (word_t) bo->bo_fd);
+					poke_reg(tracee, SYSARG_6, 0);
+					VERBOSE(tracee, 2, "android_dri: mmap DRM fd %d -> bo_fd %d (handle %u)",
+						mmapFd, bo->bo_fd, handle);
+				}
+			}
+		}
+
 		/* Record stat-like syscalls on the virtual node; proot rewrites the path
 		 * pointer before the exit stop, so the check must happen at entry. */
 		if (sysnum == PR_statx || sysnum == PR_newfstatat) {
@@ -716,16 +812,31 @@ int android_dri_callback(Extension *extension, ExtensionEvent event,
 	}
 
 	case SYSCALL_CHAINED_EXIT: {
-		PrimePending *pending = prime_state_for(tracee->pid, false);
+		ChainPending *pending = chain_state_for(tracee->pid, false);
 		if (pending != NULL) {
-			struct dma_heap_allocation_data alloc;
-			struct drm_prime_handle prime;
+			if (pending->kind == 1) {
+				/* create_dumb: record the real heap fd on the BO. */
+				struct dma_heap_allocation_data alloc;
+				DriBoEntry *bo = find_bo(tracee->pid, -1, pending->handle);
+				if (read_data(tracee, &alloc, pending->scratch, sizeof(alloc)) >= 0
+				    && (int32_t) alloc.fd > 0 && bo != NULL) {
+					bo->bo_fd = (int32_t) alloc.fd;
+					VERBOSE(tracee, 2, "android_dri: dumb handle %u backed by heap fd %d",
+						pending->handle, bo->bo_fd);
+				}
+			} else if (pending->kind == 2 || pending->kind == 3) {
+				/* PRIME export: publish the exported fd into the ioctl argument. */
+				struct drm_prime_handle prime;
+				int32_t exportedFd = (int32_t) peek_reg(tracee, CURRENT, SYSARG_RESULT);
 
-			if (read_data(tracee, &alloc, pending->scratch, sizeof(alloc)) >= 0
-			    && read_data(tracee, &prime, pending->arg, sizeof(prime)) >= 0) {
-				if ((int32_t) alloc.fd > 0) {
+				if (pending->kind == 2) {
+					struct dma_heap_allocation_data alloc;
+					if (read_data(tracee, &alloc, pending->scratch, sizeof(alloc)) >= 0)
+						exportedFd = (int32_t) alloc.fd;
+				}
+				if (exportedFd > 0 && read_data(tracee, &prime, pending->arg, sizeof(prime)) >= 0) {
 					prime.handle = pending->handle;
-					prime.fd = (int32_t) alloc.fd;
+					prime.fd = exportedFd;
 					write_data(tracee, pending->arg, &prime, sizeof(prime));
 					VERBOSE(tracee, 2, "android_dri: exported DMA-BUF fd %d for handle %u",
 						prime.fd, pending->handle);
@@ -733,6 +844,7 @@ int android_dri_callback(Extension *extension, ExtensionEvent event,
 			}
 			pending->active = false;
 			pending->pid = 0;
+			pending->kind = 0;
 		}
 		break;
 	}

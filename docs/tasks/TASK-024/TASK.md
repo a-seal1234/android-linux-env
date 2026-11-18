@@ -8,7 +8,7 @@
 **Planning workspace / branch / base:** `/media/DATA/project/android-linux-env` / `main`  
 **Write scope:** `core/proot/` (vendored `lib_proot.so` + rebuilt proot sources), `bridge/wayland/`, `core/session/`, `docs/tasks/TASK-024/`  
 **Risk:** Critical  
-**Status:** In Progress — Hyprland composites continuously through the bridge (frame callbacks verified end-to-end), but it busy-loops before creating its IPC socket and does not render mapped client content yet.
+**Status:** In Progress — the shared dumb-buffer backing (mmap ⇄ PRIME) and VSync frame pacing are implemented and verified on-device; Hyprland still stops presenting after its first output frame and does not create its IPC socket, so the desktop is not yet visible.
 **Depends on:** TASK-023 (AC-08..AC-11: in-app PRoot works, SIGSYS suppressed, SHM desktop verified).  
 **Fallback preserved:** the LabWC Safe Mode profile (pixman / `wl_shm`) must remain fully functional.
 
@@ -87,6 +87,9 @@ render node inside the guest, backed by Android's DMA-BUF heap:
 | **AC-08** | KWin 6.8 passes `supportedCompositors()` and renders Plasma + Konsole | **Blocked (same gate)** — KWin needs a `RenderDevice` from `GpuManager` (libdrm enumeration/udev) and an EGL/GBM context, which hits the same Mesa `dri_gbm` crash. |
 | **AC-09** | LabWC Safe Mode (SHM) remains functional | **Done** — LabWC 0.20.2 + Konsole 26.8.3 render normally; default profile left on LABWC |
 | **AC-10** | Unit tests pass; screenshot evidence captured; commit pushed to `origin/main` | **Done (partial screenshot)** — `./gradlew test` green; evidence in `docs/tasks/TASK-024/evidence/`; commit pushed. Hyprland desktop screenshot still pending (AC-07). |
+| **AC-14** | Dumb-buffer backing shared across `CREATE_DUMB` → `mmap` → `PRIME_HANDLE_TO_FD` | **Done** — `DRM_IOCTL_MODE_CREATE_DUMB` chains a real `DMA_HEAP_IOCTL_ALLOC` so each handle owns a `bo_fd`; `MODE_MAP_DUMB` returns `offset = handle << 16`; `PR_mmap` on the virtual DRM fd is rewritten to the BO's `bo_fd` at offset 0; PRIME export duplicates `bo_fd`, so the composited dma-buf aliases the memory `kms_swrast` renders into. Verified by a guest self-test: `dumb handle=1 pitch=256 size=16384`, `map offset=0x10000`, `prime fd=5`, **`DUMB_SHARE_OK`** ([test output](evidence/dumb_share_test.txt)). |
+| **AC-15** | Display-synchronised `wl_callback.done` pacing (dynamic refresh rate) | **Done** — `wl_surface.commit` no longer replies synchronously: callbacks are queued and flushed from `AChoreographer_postFrameCallback64` on the host VSync, with a dead-man timer derived from the live refresh rate (`DisplayManager.DisplayListener` → `nativeSetRefreshRate`, 60–144 Hz) when the choreographer pauses. `wl_output.mode` and presentation refresh follow the live rate; `wp_presentation` is no longer announced. Verified: `Frame pacing thread started (AChoreographer available)`, `Display refresh rate updated: 120.00 Hz`, `Flushing 1 frame callback(s) at VSync`, `Frame callback 19 -> fd 228` ([trace](evidence/vsync_pacing_trace.log)). |
+| **AC-16** | Hyprland launched through `start-hyprland` (0.57 runtime instance/IPC ownership) | **Done** — session launch normalises `Hyprland` → `start-hyprland -- <args>`; argv verified on device. |
 | **AC-13** | Host lifecycle events & chain-state robustness (2026-11-18) | **Done** — `wl_surface.enter(output)` is now emitted once per surface (on create/get_toplevel/commit) for clients that bind `wl_output`; `wl_callback.done` delivery was traced end-to-end (registration → commit → blit → done → next commit); PRoot's `PRIME_HANDLE_TO_FD` chained `DMA_HEAP_IOCTL_ALLOC` state is now **per-tracee** (Hyprland exports dma-bufs from multiple threads; the previous global slot mis-associated completions and wedged the tracer with the tracee stuck in a ptrace stop). |
 | **AC-12** | `drmGetDevice2` interposer + KMS capability constants + compositor/app GBM driver split | **Done** — `libalw_drm.so` now interposes `drmGetDevice2` (delegating to the real symbol for non-virtual fds) and provides valid businfo/deviceinfo in the synthetic `drmDevice`; `android_dri` reports `TIMESTAMP_MONOTONIC=1` and `ADDFB2_MODIFIERS=1` and emulates `MODE_GETRESOURCES`/`GETCRTC`/`SETCRTC`/`ADDFB`/`ADDFB2`/`RMFB`/`SET|DROP_MASTER`; the compositor runs with `MESA_LOADER_DRIVER_OVERRIDE=kms_swrast` and **no** `GALLIUM_DRIVER`/`LIBGL_ALWAYS_SOFTWARE=1` (both break EGL-on-GBM on the virtual node). LabWC Safe Mode untouched. |
 
@@ -123,21 +126,27 @@ reopenDRMNode: opening node /dev/dri/renderD128
 
 ## 6. Remaining blockers (next increment)
 
-1. **Hyprland userspace busy-loop before IPC socket creation** — after the output
-   swapchains (3x 3200x2136 + 2x cursor) are created and the first commits flow,
-   Hyprland spins (user-space, proot idle) and never creates
-   `$XDG_RUNTIME_DIR/hypr/<sig>/.socket.sock`. `wl_callback.done` and
-   `wl_buffer.release` are provably delivered (see trace), and Aquamarine logs
-   only a benign "pending state has a non-released buffer??" warning. A mapped
-   Konsole window is not composited. Next suspects: the frame scheduler's
-   timer/presentation pacing interaction (repeated `timerfd_settime` in the
-   spin), or the missing `wp_fractional_scale`/`wp_output` negotiation that
-   Aquamarine's consumer side expects before driving damage-based frames.
-2. **AHardwareBuffer import** — HyperOS gralloc still rejects the raw
+1. **Hyprland stops presenting after its first output frame** — with the shared
+   buffer and VSync pacing in place, Hyprland still commits only its initial
+   3200x2136 frame (plus cursor-surface setup) and issues no further
+   `wl_surface.commit` on its output surface, even while a client
+   (`weston-simple-shm`, verified via `WAYLAND_DEBUG`: configure → attach →
+   commit → `wl_buffer.release`) is composited. `wl_buffer.release` is
+   delivered; Aquamarine's log ends right after the cursor swapchain
+   reconfigure with a benign "pending state has a non-released buffer??"
+   warning. `.socket.sock` never appears even under `start-hyprland`
+   (`CUnixImpl::start()` is never reached), i.e. Hyprland stops before
+   `startCompositor()` completes.
+2. **Legacy INI config is not applied by Hyprland 0.57** — the 0.57 config
+   manager is Lua-based (`Config::Lua::CConfigManager`); `/tmp/android-session.conf`
+   is loaded but `debug.enable_stdout_logs = 0` etc. are ignored, so
+   `xwayland { enabled = false }` and `exec-once` never take effect. The
+   file-based log stops being written at the same point as (1).
+3. **AHardwareBuffer import** — HyperOS gralloc still rejects the raw
    `native_handle` (`rc=5`); the mmap fallback composites correctly (and is what
    renders Hyprland's frame). Resolving the vendor handle layout would give a
    true GPU zero-copy present path.
-3. **KWin** — needs `GpuManager` render-device enumeration (libdrm/udev) and its
+4. **KWin** — needs `GpuManager` render-device enumeration (libdrm/udev) and its
    own EGL/GBM init; the same kms_swrast path applies once (1) is resolved.
 
 ## 4. Verification Plan

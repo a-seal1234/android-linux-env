@@ -312,7 +312,9 @@ data class StackProfile(
                 ),
                 compositor = CompositorConfig(
                     type = CompositorType.HYPRLAND,
-                    execCommand = "Hyprland",
+                    // Hyprland 0.57 expects its start-hyprland wrapper: it creates the
+                    // runtime instance dir, the .socket.sock IPC endpoint and the watchdog.
+                    execCommand = "start-hyprland",
                     configMode = ConfigMode.WRAP_AND_OVERRIDE,
                     userConfigPath = "/home/alw/.config/hypr/hyprland.conf",
                     sessionConfigPath = "/tmp/android-session.conf",

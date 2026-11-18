@@ -83,6 +83,7 @@ class WaylandServerManager {
 
     private external fun nativeSetSurface(surface: Surface?)
     private external fun nativeResizeSurface(width: Int, height: Int)
+    private external fun nativeSetRefreshRate(hz: Float)
     private external fun nativeIsRunning(): Boolean
     private external fun nativeGetActiveClients(): Int
     private external fun nativeIsTabletV2Supported(): Boolean
@@ -117,6 +118,7 @@ class WaylandServerManager {
     private var mockWidth = 3200
     private var mockHeight = 2136
     private var mockScale = 1.75f
+    private var mockRefreshRateHz = 60f
     private var mockSurfaceAttached = false
 
     val mockTablet = MockTabletState()
@@ -170,6 +172,17 @@ class WaylandServerManager {
         mockHeight = height
         if (isNativeLoaded) {
             nativeResizeSurface(width, height)
+        }
+    }
+
+    /**
+     * Forwards the host display's current refresh rate so the native bridge paces
+     * wl_callback.done at the live VSync cadence (60-144 Hz) and reports it in wl_output.
+     */
+    fun setRefreshRate(hz: Float) {
+        mockRefreshRateHz = if (hz > 0f) hz else 60f
+        if (isNativeLoaded) {
+            nativeSetRefreshRate(mockRefreshRateHz)
         }
     }
 
