@@ -8,7 +8,7 @@
 **Planning workspace / branch / base:** `/media/DATA/project/android-linux-env` / `main`  
 **Write scope:** `core/proot/` (vendored `lib_proot.so` + rebuilt proot sources), `bridge/wayland/`, `core/session/`, `docs/tasks/TASK-024/`  
 **Risk:** Critical  
-**Status:** In Progress — Aquamarine `CBackend::start()` now succeeds and Hyprland composites its first 3200x2136 DMA-BUF frame through the bridge; Hyprland then stalls before creating its IPC socket / rendering further frames, so no interactive desktop yet.
+**Status:** In Progress — Hyprland composites continuously through the bridge (frame callbacks verified end-to-end), but it busy-loops before creating its IPC socket and does not render mapped client content yet.
 **Depends on:** TASK-023 (AC-08..AC-11: in-app PRoot works, SIGSYS suppressed, SHM desktop verified).  
 **Fallback preserved:** the LabWC Safe Mode profile (pixman / `wl_shm`) must remain fully functional.
 
@@ -83,10 +83,11 @@ render node inside the guest, backed by Android's DMA-BUF heap:
 | **AC-04** | `zwp_linux_dmabuf_v1` v4 + feedback global advertised; format table over `memfd` | **Done** — Aquamarine log: `Got format AR24/XR24 with modifier LINEAR`, `Got main device`, `Got done` |
 | **AC-05** | DMA-BUF `wl_buffer` imported and composited (EGL primary path, mmap fallback) | **Done (mmap fallback)** — `dmabuf: AHardwareBuffer_createFromHandle rejected (rc=5); using mmap fallback`, `mmap fallback blit active (640x480)` |
 | **AC-06** | Standalone dmabuf EGL client renders through `wayland-0` | **Done** — `alw-dmabuf-client` allocates from `/dev/dma_heap/system`, submits `zwp_linux_dmabuf_v1`, `DMABUF_CLIENT_OK`; screen shows the gradient ([screenshot](evidence/screen_dmabuf_client.png)) |
-| **AC-07** | Hyprland passes `CBackend::create()` and renders desktop + Konsole | **Partial** — `CBackend::create()` **and** `CBackend::start()` now succeed (`CBackend::start() = 1`, [probe output](evidence/aquamarine_probe_success.txt)); Hyprland runs, initializes EGL on the virtual node, exports a real 3200x2136 XRGB8888 DMA-BUF and the bridge composites it (`Blitted frame #1`, [frames log](evidence/hyprland_bridge_frames.log)). Hyprland then stalls before creating its IPC socket (`.socket.sock` absent) and stops committing frames — desktop/Konsole not yet visible. |
+| **AC-07** | Hyprland passes `CBackend::create()` and renders desktop + Konsole | **Partial** — `CBackend::create()`/`start()` succeed; Hyprland initializes EGL, exports real 3200x2136 XRGB8888 DMA-BUFs and commits **continuously** through the bridge (same-buffer recommits, `wl_buffer.release` + `wl_callback.done` verified, [trace](evidence/frame_callback_trace.log)). A mapped Konsole is not composited, the IPC socket is still absent, and Hyprland ends up busy-looping; no desktop screenshot yet. |
 | **AC-08** | KWin 6.8 passes `supportedCompositors()` and renders Plasma + Konsole | **Blocked (same gate)** — KWin needs a `RenderDevice` from `GpuManager` (libdrm enumeration/udev) and an EGL/GBM context, which hits the same Mesa `dri_gbm` crash. |
 | **AC-09** | LabWC Safe Mode (SHM) remains functional | **Done** — LabWC 0.20.2 + Konsole 26.8.3 render normally; default profile left on LABWC |
 | **AC-10** | Unit tests pass; screenshot evidence captured; commit pushed to `origin/main` | **Done (partial screenshot)** — `./gradlew test` green; evidence in `docs/tasks/TASK-024/evidence/`; commit pushed. Hyprland desktop screenshot still pending (AC-07). |
+| **AC-13** | Host lifecycle events & chain-state robustness (2026-11-18) | **Done** — `wl_surface.enter(output)` is now emitted once per surface (on create/get_toplevel/commit) for clients that bind `wl_output`; `wl_callback.done` delivery was traced end-to-end (registration → commit → blit → done → next commit); PRoot's `PRIME_HANDLE_TO_FD` chained `DMA_HEAP_IOCTL_ALLOC` state is now **per-tracee** (Hyprland exports dma-bufs from multiple threads; the previous global slot mis-associated completions and wedged the tracer with the tracee stuck in a ptrace stop). |
 | **AC-12** | `drmGetDevice2` interposer + KMS capability constants + compositor/app GBM driver split | **Done** — `libalw_drm.so` now interposes `drmGetDevice2` (delegating to the real symbol for non-virtual fds) and provides valid businfo/deviceinfo in the synthetic `drmDevice`; `android_dri` reports `TIMESTAMP_MONOTONIC=1` and `ADDFB2_MODIFIERS=1` and emulates `MODE_GETRESOURCES`/`GETCRTC`/`SETCRTC`/`ADDFB`/`ADDFB2`/`RMFB`/`SET|DROP_MASTER`; the compositor runs with `MESA_LOADER_DRIVER_OVERRIDE=kms_swrast` and **no** `GALLIUM_DRIVER`/`LIBGL_ALWAYS_SOFTWARE=1` (both break EGL-on-GBM on the virtual node). LabWC Safe Mode untouched. |
 
 ## 5. Verified on-device evidence (Xiaomi Pad 8, `d370854b`)
@@ -122,14 +123,16 @@ reopenDRMNode: opening node /dev/dri/renderD128
 
 ## 6. Remaining blockers (next increment)
 
-1. **Hyprland render-loop stall after the first frame** — Hyprland starts, EGL
-   initializes and one DMA-BUF frame is committed/blitted, but it never creates
-   `$XDG_RUNTIME_DIR/hypr/<sig>/.socket.sock` and issues no further commits.
-   Observed: `EGL setup failed, disabling glamor` (Xwayland, expected with
-   `xwayland.enabled=false`), Hyprland parked in `epoll_wait`. Suspects: the
-   bridge's `wp_presentation`/frame-callback sequencing for the compositor's own
-   output surface, or its need for a `wl_surface.enter`/output `done` roundtrip
-   before driving the render loop solely from damage.
+1. **Hyprland userspace busy-loop before IPC socket creation** — after the output
+   swapchains (3x 3200x2136 + 2x cursor) are created and the first commits flow,
+   Hyprland spins (user-space, proot idle) and never creates
+   `$XDG_RUNTIME_DIR/hypr/<sig>/.socket.sock`. `wl_callback.done` and
+   `wl_buffer.release` are provably delivered (see trace), and Aquamarine logs
+   only a benign "pending state has a non-released buffer??" warning. A mapped
+   Konsole window is not composited. Next suspects: the frame scheduler's
+   timer/presentation pacing interaction (repeated `timerfd_settime` in the
+   spin), or the missing `wp_fractional_scale`/`wp_output` negotiation that
+   Aquamarine's consumer side expects before driving damage-based frames.
 2. **AHardwareBuffer import** — HyperOS gralloc still rejects the raw
    `native_handle` (`rc=5`); the mmap fallback composites correctly (and is what
    renders Hyprland's frame). Resolving the vendor handle layout would give a

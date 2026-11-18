@@ -225,12 +225,38 @@ static pid_t s_pendingOpenPid = 0;
 static pid_t s_pendingStatPid = 0;
 static int s_pendingStatKind = 0;
 
-/* Pending PRIME_HANDLE_TO_FD: chained DMA_HEAP_IOCTL_ALLOC in the tracee. */
-static pid_t s_primePid = 0;
-static word_t s_primeArg = 0;
-static word_t s_primeScratch = 0;
-static uint32_t s_primeHandle = 0;
-static bool s_primeActive = false;
+/* Pending PRIME_HANDLE_TO_FD per tracee/thread: chained DMA_HEAP_IOCTL_ALLOC.
+ * Hyprland exports dma-bufs from multiple threads concurrently, so this state
+ * must be per-pid (a single global slot mis-associates chained completions and
+ * wedges the tracer). */
+#define MAX_PRIME_PENDING 64
+typedef struct {
+	pid_t pid;
+	word_t arg;
+	word_t scratch;
+	uint32_t handle;
+	bool active;
+} PrimePending;
+
+static PrimePending s_primePending[MAX_PRIME_PENDING];
+
+static PrimePending *prime_state_for(pid_t pid, bool create)
+{
+	size_t i;
+	PrimePending *free_slot = NULL;
+
+	for (i = 0; i < MAX_PRIME_PENDING; i++) {
+		if (s_primePending[i].active && s_primePending[i].pid == pid)
+			return &s_primePending[i];
+		if (!s_primePending[i].active && free_slot == NULL)
+			free_slot = &s_primePending[i];
+	}
+	if (!create || free_slot == NULL)
+		return NULL;
+	memset(free_slot, 0, sizeof(*free_slot));
+	free_slot->pid = pid;
+	return free_slot;
+}
 
 static bool is_dri_path(const char *path)
 {
@@ -490,11 +516,18 @@ static void emulate_ioctl(Tracee *tracee, int fd, unsigned long request, word_t 
 				}
 
 				force_chain_final_result(tracee, 0);
-				s_primePid = tracee->pid;
-				s_primeArg = arg;
-				s_primeScratch = scratch;
-				s_primeHandle = prime.handle;
-				s_primeActive = true;
+				{
+					PrimePending *pending = prime_state_for(tracee->pid, true);
+					if (pending == NULL) {
+						VERBOSE(tracee, 2, "android_dri: no PRIME pending slot");
+						poke_reg(tracee, SYSARG_RESULT, (word_t) -EINVAL);
+						return;
+					}
+					pending->arg = arg;
+					pending->scratch = scratch;
+					pending->handle = prime.handle;
+					pending->active = true;
+				}
 				VERBOSE(tracee, 2, "android_dri: chained DMA_HEAP_IOCTL_ALLOC for handle %u (size %llu)",
 					prime.handle, (unsigned long long) bo->size);
 				return;
@@ -683,22 +716,23 @@ int android_dri_callback(Extension *extension, ExtensionEvent event,
 	}
 
 	case SYSCALL_CHAINED_EXIT: {
-		if (s_primeActive && s_primePid == tracee->pid) {
+		PrimePending *pending = prime_state_for(tracee->pid, false);
+		if (pending != NULL) {
 			struct dma_heap_allocation_data alloc;
 			struct drm_prime_handle prime;
-			s_primeActive = false;
 
-			if (read_data(tracee, &alloc, s_primeScratch, sizeof(alloc)) >= 0
-			    && read_data(tracee, &prime, s_primeArg, sizeof(prime)) >= 0) {
+			if (read_data(tracee, &alloc, pending->scratch, sizeof(alloc)) >= 0
+			    && read_data(tracee, &prime, pending->arg, sizeof(prime)) >= 0) {
 				if ((int32_t) alloc.fd > 0) {
-					prime.handle = s_primeHandle;
+					prime.handle = pending->handle;
 					prime.fd = (int32_t) alloc.fd;
-					write_data(tracee, s_primeArg, &prime, sizeof(prime));
+					write_data(tracee, pending->arg, &prime, sizeof(prime));
 					VERBOSE(tracee, 2, "android_dri: exported DMA-BUF fd %d for handle %u",
-						prime.fd, s_primeHandle);
+						prime.fd, pending->handle);
 				}
 			}
-			s_primePid = 0;
+			pending->active = false;
+			pending->pid = 0;
 		}
 		break;
 	}

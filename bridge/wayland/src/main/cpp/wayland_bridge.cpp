@@ -248,6 +248,7 @@ struct ClientSurface {
     std::vector<uint32_t> presentationFeedbacks;
     bool isCursor = false;
     bool isXdgSurface = false;
+    bool enteredOutput = false;
 };
 
 struct XdgPositioner {
@@ -1215,6 +1216,19 @@ private:
         return true;
     }
 
+    // Sends wl_surface.enter(wl_output) once per surface. Nested compositors such as
+    // Aquamarine wait for the output enter event to latch the output scale/refresh and
+    // to start driving their render loop (Hyprland's startCompositor -> .socket.sock).
+    void sendSurfaceEnterIfNeeded(WaylandClient& client, ClientSurface& surface) {
+        if (surface.enteredOutput || client.outputId == 0 || surface.surfaceId == 0)
+            return;
+        WaylandMessageWriter enter(surface.surfaceId, 0); // wl_surface.enter(output)
+        enter.putUint32(client.outputId);
+        sendPacket(client.fd, enter);
+        surface.enteredOutput = true;
+        LOGI("Sent wl_surface.enter(output=%u) to surface %u", client.outputId, surface.surfaceId);
+    }
+
     // Process a single Wayland message from a client
     void dispatchMessage(WaylandClient& client, uint32_t objId, uint16_t opcode,
                          const uint8_t* payload, size_t payloadLen) {
@@ -1533,6 +1547,7 @@ private:
                 ClientSurface s;
                 s.surfaceId = surfaceId;
                 client.surfaces[surfaceId] = s;
+                sendSurfaceEnterIfNeeded(client, client.surfaces[surfaceId]);
             }
             return;
         }
@@ -1552,8 +1567,13 @@ private:
                 // wl_surface.frame(callback_id)
                 uint32_t callbackId = reader.readUint32();
                 surface.frameCallbacks.push_back(callbackId);
+                LOGI("wl_surface %u: frame callback %u registered", surface.surfaceId, callbackId);
             } else if (opcode == 6) {
                 // wl_surface.commit() -> Blit the active window buffer!
+                LOGI("wl_surface %u: commit (buffer=%u, frameCallbacks=%zu, xdg=%d)",
+                     surface.surfaceId, surface.attachedBufferId,
+                     surface.frameCallbacks.size(), surface.isXdgSurface ? 1 : 0);
+                sendSurfaceEnterIfNeeded(client, surface);
                 if (surface.attachedBufferId > 0) {
                     auto dbIt = client.dmabufBuffers.find(surface.attachedBufferId);
                     if (dbIt != client.dmabufBuffers.end()) {
@@ -1566,6 +1586,7 @@ private:
                         // wl_buffer.release: the imported fd set is retained; the client may reuse
                         WaylandMessageWriter releaseMsg(surface.attachedBufferId, 0);
                         sendPacket(client.fd, releaseMsg);
+                        LOGI("wl_buffer %u: release sent (dmabuf)", surface.attachedBufferId);
                     }
 
                     auto bIt = client.buffers.find(surface.attachedBufferId);
@@ -1595,6 +1616,7 @@ private:
                     WaylandMessageWriter frameDone(cb, 0); // wl_callback.done
                     frameDone.putUint32(now);
                     sendPacket(client.fd, frameDone);
+                    LOGI("wl_surface %u: wl_callback.done sent to callback %u", surface.surfaceId, cb);
                 }
                 surface.frameCallbacks.clear();
 
@@ -1701,6 +1723,7 @@ private:
                 client.xdgSurfaces[newId] = xs;
                 client.surfaces[surfId].isXdgSurface = true;
                 client.activeSurfaceId = surfId;
+                sendSurfaceEnterIfNeeded(client, client.surfaces[surfId]);
             } else if (opcode == 3) {
                 // xdg_wm_base.pong(serial)
             }

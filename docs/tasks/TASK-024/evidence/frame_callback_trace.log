@@ -1,0 +1,45 @@
+11-18 22:39:56.865 I/ALW::WaylandBridgeNative(18442): wl_surface 13: commit (buffer=0, frameCallbacks=0, xdg=1)
+11-18 22:39:58.012 I/ALW::WaylandBridgeNative(18442): wl_surface 13: frame callback 19 registered
+11-18 22:39:58.012 I/ALW::WaylandBridgeNative(18442): wl_surface 13: commit (buffer=18, frameCallbacks=1, xdg=1)
+11-18 22:39:58.017 I/ALW::WaylandBridgeNative(18442): Blitted frame #1: 3200x2136 (stride=12800, fmt=1) -> ANativeWindow 3200x2136 (stride=3200)
+11-18 22:39:58.055 I/ALW::WaylandBridgeNative(18442): wl_buffer 18: release sent (dmabuf)
+11-18 22:39:58.055 I/ALW::WaylandBridgeNative(18442): wl_surface 13: wl_callback.done sent to callback 19
+11-18 22:39:58.055 I/ALW::WaylandBridgeNative(18442): wl_surface 13: commit (buffer=18, frameCallbacks=0, xdg=1)
+11-18 22:39:58.095 I/ALW::WaylandBridgeNative(18442): wl_buffer 18: release sent (dmabuf)
+11-18 22:39:58.807 I/ALW::WaylandBridgeNative(18442): wl_surface 13: commit (buffer=18, frameCallbacks=0, xdg=1)
+11-18 22:39:58.854 I/ALW::WaylandBridgeNative(18442): wl_buffer 18: release sent (dmabuf)
+11-18 22:41:21.735 I/ALW::WaylandBridgeNative(18442): wl_surface 25: commit (buffer=27, frameCallbacks=0, xdg=0)
+11-18 22:41:21.735 I/ALW::WaylandBridgeNative(18442): wl_surface 21: commit (buffer=0, frameCallbacks=0, xdg=1)
+11-18 22:41:21.736 I/ALW::WaylandBridgeNative(18442): wl_surface 21: frame callback 30 registered
+11-18 22:41:21.736 I/ALW::WaylandBridgeNative(18442): wl_surface 21: commit (buffer=29, frameCallbacks=1, xdg=1)
+11-18 22:41:21.807 I/ALW::WaylandBridgeNative(18442): wl_surface 21: wl_callback.done sent to callback 30
+11-18 22:41:21.807 I/ALW::WaylandBridgeNative(18442): wl_surface 25: commit (buffer=33, frameCallbacks=0, xdg=0)
+11-18 22:41:21.807 I/ALW::WaylandBridgeNative(18442): wl_surface 25: commit (buffer=0, frameCallbacks=0, xdg=0)
+11-18 22:41:21.808 I/ALW::WaylandBridgeNative(18442): wl_surface 25: commit (buffer=35, frameCallbacks=0, xdg=0)
+11-18 22:41:22.162 I/ALW::WaylandBridgeNative(18442): wl_surface 21: frame callback 36 registered
+11-18 22:41:22.162 I/ALW::WaylandBridgeNative(18442): wl_surface 21: commit (buffer=29, frameCallbacks=1, xdg=1)
+11-18 22:41:22.213 I/ALW::WaylandBridgeNative(18442): wl_surface 21: wl_callback.done sent to callback 36
+11-18 22:41:25.178 I/ALW::WaylandBridgeNative(18442): wl_surface 21: frame callback 38 registered
+11-18 22:41:25.178 I/ALW::WaylandBridgeNative(18442): wl_surface 21: commit (buffer=29, frameCallbacks=1, xdg=1)
+11-18 22:41:25.233 I/ALW::WaylandBridgeNative(18442): wl_surface 21: wl_callback.done sent to callback 38
+11-18 22:41:25.246 I/ALW::WaylandBridgeNative(18442): wl_surface 21: frame callback 40 registered
+11-18 22:41:25.246 I/ALW::WaylandBridgeNative(18442): wl_surface 21: commit (buffer=29, frameCallbacks=1, xdg=1)
+11-18 22:41:25.292 I/ALW::WaylandBridgeNative(18442): wl_surface 21: wl_callback.done sent to callback 40
+11-18 22:41:25.297 I/ALW::WaylandBridgeNative(18442): wl_surface 21: frame callback 42 registered
+11-18 22:41:25.297 I/ALW::WaylandBridgeNative(18442): wl_surface 21: commit (buffer=29, frameCallbacks=1, xdg=1)
+11-18 22:41:25.343 I/ALW::WaylandBridgeNative(18442): wl_surface 21: wl_callback.done sent to callback 42
+11-18 22:41:25.457 I/ALW::WaylandBridgeNative(18442): wl_surface 21: frame callback 44 registered
+11-18 22:41:25.457 I/ALW::WaylandBridgeNative(18442): wl_surface 21: commit (buffer=29, frameCallbacks=1, xdg=1)
+11-18 22:41:25.506 I/ALW::WaylandBridgeNative(18442): wl_surface 21: wl_callback.done sent to callback 44
+11-18 22:41:25.516 I/ALW::WaylandBridgeNative(18442): wl_surface 21: frame callback 46 registered
+11-18 22:41:25.516 I/ALW::WaylandBridgeNative(18442): wl_surface 21: commit (buffer=29, frameCallbacks=1, xdg=1)
+11-18 22:41:25.561 I/ALW::WaylandBridgeNative(18442): wl_surface 21: wl_callback.done sent to callback 46
+11-18 22:41:25.563 I/ALW::WaylandBridgeNative(18442): wl_surface 21: frame callback 48 registered
+11-18 22:41:25.563 I/ALW::WaylandBridgeNative(18442): wl_surface 21: commit (buffer=29, frameCallbacks=1, xdg=1)
+11-18 22:41:25.611 I/ALW::WaylandBridgeNative(18442): wl_surface 21: wl_callback.done sent to callback 48
+11-18 22:41:25.614 I/ALW::WaylandBridgeNative(18442): wl_surface 21: frame callback 50 registered
+11-18 22:41:25.614 I/ALW::WaylandBridgeNative(18442): wl_surface 21: commit (buffer=29, frameCallbacks=1, xdg=1)
+11-18 22:41:25.660 I/ALW::WaylandBridgeNative(18442): wl_surface 21: wl_callback.done sent to callback 50
+11-18 22:41:26.144 I/ALW::WaylandBridgeNative(18442): wl_surface 21: frame callback 52 registered
+11-18 22:41:26.144 I/ALW::WaylandBridgeNative(18442): wl_surface 21: commit (buffer=29, frameCallbacks=1, xdg=1)
+11-18 22:41:26.192 I/ALW::WaylandBridgeNative(18442): wl_surface 21: wl_callback.done sent to callback 52
