@@ -45,6 +45,7 @@ class FakeFsManager(
     ) : this(dirs.fakefsBaseDir, hostProcChecker)
 
     val devShmDir: File get() = File(baseDir, "dev/shm")
+    val devDriDir: File get() = File(baseDir, "dev/dri")
     val tmpDir: File get() = File(baseDir, "tmp")
     val varTmpDir: File get() = File(baseDir, "var/tmp")
     val runDir: File get() = File(baseDir, "run")
@@ -67,6 +68,7 @@ class FakeFsManager(
         // Materialize writable host-backed directories
         listOf(
             devShmDir,
+            devDriDir,
             tmpDir,
             varTmpDir,
             runDir,
@@ -86,6 +88,15 @@ class FakeFsManager(
 
         // Subdirectories required inside tmp
         val runtimeAlwDir = File(tmpDir, "runtime-alw")
+
+        // Virtual DRI directory: listable /dev/dri with a renderD128 placeholder entry
+        // (the real node is SELinux-denied; ProotRunner binds the DMA-BUF heap over the
+        // file path and the android_dri PRoot extension spoofs its char-device stat).
+        val driRenderNode = File(devDriDir, "renderD128")
+        if (!driRenderNode.exists()) {
+            driRenderNode.writeText("")
+        }
+
         if (!runtimeAlwDir.exists()) {
             runtimeAlwDir.mkdirs()
             try {

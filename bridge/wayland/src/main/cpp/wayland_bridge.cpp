@@ -2,16 +2,29 @@
 #include <android/log.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
+#include <android/hardware_buffer.h>
 
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/sysmacros.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/file.h>
 #include <sys/syscall.h>
+#include <linux/dma-buf.h>
+#include <time.h>
+#include <dlfcn.h>
+
+/* DRM fourcc codes used by zwp_linux_dmabuf_v1 format negotiation */
+#define DRM_FORMAT_ARGB8888 0x34325241u
+#define DRM_FORMAT_XRGB8888 0x34325258u
+#define DRM_FORMAT_MOD_LINEAR 0x0000000000000000ull
+/* Android virtual render node advertised as the linux-dmabuf main device */
+#define ALW_VIRTUAL_DRM_DEV makedev(226, 128)
 
 #ifndef __NR_memfd_create
 #define __NR_memfd_create 279
@@ -190,6 +203,44 @@ struct ShmBuffer {
     uint32_t format = 0;
 };
 
+/* One plane of a client-provided DMA-BUF (zwp_linux_buffer_params_v1.add) */
+struct DmabufPlane {
+    int fd = -1;
+    uint32_t planeIdx = 0;
+    uint32_t offset = 0;
+    uint32_t stride = 0;
+    uint64_t modifier = 0;
+};
+
+/* Imported DMA-BUF backed wl_buffer (zwp_linux_dmabuf_v1 v4) */
+struct DmabufBuffer {
+    uint32_t bufferId = 0;
+    int32_t width = 0;
+    int32_t height = 0;
+    uint32_t format = 0;
+    uint32_t flags = 0;
+    std::vector<DmabufPlane> planes;
+
+    ~DmabufBuffer() {
+        for (auto& plane : planes) {
+            if (plane.fd >= 0) {
+                close(plane.fd);
+                plane.fd = -1;
+            }
+        }
+    }
+};
+
+/* Accumulating params object between add() and create_immediate()/create() */
+struct DmabufParams {
+    uint32_t id = 0;
+    std::vector<DmabufPlane> planes;
+};
+
+struct DmabufFeedback {
+    uint32_t id = 0;
+};
+
 struct ClientSurface {
     uint32_t surfaceId;
     uint32_t attachedBufferId = 0;
@@ -258,6 +309,7 @@ struct WaylandClient {
     uint32_t presentationId = 0;
     uint32_t toplevelIconManagerId = 0;
     uint32_t shortcutsInhibitManagerId = 0;
+    uint32_t dmabufId = 0;
 
     uint32_t activeSurfaceId = 0;
     bool pointerEntered = false;
@@ -268,6 +320,9 @@ struct WaylandClient {
 
     std::unordered_map<uint32_t, ShmPool> shmPools;
     std::unordered_map<uint32_t, ShmBuffer> buffers;
+    std::unordered_map<uint32_t, std::shared_ptr<DmabufBuffer>> dmabufBuffers;
+    std::unordered_map<uint32_t, DmabufParams> dmabufParams;
+    std::unordered_set<uint32_t> dmabufFeedbacks;
     std::unordered_map<uint32_t, ClientSurface> surfaces;
     std::unordered_map<uint32_t, XdgPositioner> xdgPositioners;
     std::unordered_map<uint32_t, XdgSurface> xdgSurfaces;
@@ -291,8 +346,12 @@ struct WaylandClient {
         presentationId = 0;
         toplevelIconManagerId = 0;
         shortcutsInhibitManagerId = 0;
+        dmabufId = 0;
         shmPools.clear();
         buffers.clear();
+        dmabufBuffers.clear();
+        dmabufParams.clear();
+        dmabufFeedbacks.clear();
         surfaces.clear();
         xdgPositioners.clear();
         xdgSurfaces.clear();
@@ -849,12 +908,12 @@ public:
 private:
     void initGlobals() {
         m_globals.clear();
-        m_globals.push_back({1, "wl_compositor", 4});
+        m_globals.push_back({1, "wl_compositor", 6});
         m_globals.push_back({2, "wl_subcompositor", 1});
         m_globals.push_back({3, "wl_shm", 1});
-        m_globals.push_back({4, "xdg_wm_base", 2});
+        m_globals.push_back({4, "xdg_wm_base", 6});
         m_globals.push_back({5, "zwp_tablet_manager_v2", 1});
-        m_globals.push_back({6, "wl_seat", 7});
+        m_globals.push_back({6, "wl_seat", 9});
         m_globals.push_back({7, "wl_output", 4});
         m_globals.push_back({8, "wl_data_device_manager", 3});
         m_globals.push_back({9, "zxdg_decoration_manager_v1", 1});
@@ -868,6 +927,7 @@ private:
         m_globals.push_back({13, "wp_presentation", 1});
         m_globals.push_back({14, "xdg_toplevel_icon_manager_v1", 1});
         m_globals.push_back({15, "zwp_keyboard_shortcuts_inhibit_manager_v1", 1});
+        m_globals.push_back({16, "zwp_linux_dmabuf_v1", 4});
     }
 
     uint32_t nextSerial() {
@@ -981,6 +1041,178 @@ private:
             }
         }
         return fd;
+    }
+
+    // --- zwp_linux_dmabuf_v1 helpers ---
+
+    int createDmabufFormatTableFd(uint32_t* outSize) {
+        struct FormatEntry {
+            uint32_t format;
+            uint32_t padding;
+            uint64_t modifier;
+        } __attribute__((packed));
+        const FormatEntry entries[2] = {
+            { DRM_FORMAT_ARGB8888, 0, DRM_FORMAT_MOD_LINEAR },
+            { DRM_FORMAT_XRGB8888, 0, DRM_FORMAT_MOD_LINEAR },
+        };
+        size_t len = sizeof(entries);
+        *outSize = static_cast<uint32_t>(len);
+
+        int fd = -1;
+#if defined(__NR_memfd_create)
+        fd = static_cast<int>(syscall(__NR_memfd_create, "alw_dmabuf_formats", MFD_CLOEXEC));
+#endif
+        if (fd < 0) return -1;
+        if (ftruncate(fd, len) != 0) {
+            close(fd);
+            return -1;
+        }
+        void* ptr = mmap(nullptr, len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (ptr == MAP_FAILED) {
+            close(fd);
+            return -1;
+        }
+        memcpy(ptr, entries, len);
+        munmap(ptr, len);
+        return fd;
+    }
+
+    // Emits the full zwp_linux_dmabuf_feedback_v1 sequence (v4).
+    void sendDmabufFeedback(int clientFd, uint32_t feedbackId) {
+        uint32_t tableSize = 0;
+        int tableFd = createDmabufFormatTableFd(&tableSize);
+        if (tableFd >= 0) {
+            WaylandMessageWriter table(feedbackId, 1); // format_table(fd, size)
+            table.putUint32(tableSize);
+            sendPacketWithFd(clientFd, table, tableFd);
+            close(tableFd);
+        }
+
+        uint64_t dev = static_cast<uint64_t>(ALW_VIRTUAL_DRM_DEV);
+        WaylandMessageWriter mainDev(feedbackId, 2); // main_device(device: array of dev_t)
+        mainDev.putArray(&dev, sizeof(dev));
+        sendPacket(clientFd, mainDev);
+
+        WaylandMessageWriter trancheDone(feedbackId, 3); // tranche_done()
+        sendPacket(clientFd, trancheDone);
+
+        WaylandMessageWriter trancheDev(feedbackId, 4); // tranche_target_device(device: array)
+        trancheDev.putArray(&dev, sizeof(dev));
+        sendPacket(clientFd, trancheDev);
+
+        // tranche_formats: array of uint16 indices into the format table
+        uint16_t indices[2] = { 0, 1 };
+        WaylandMessageWriter trancheFmts(feedbackId, 5);
+        trancheFmts.putArray(indices, sizeof(indices));
+        sendPacket(clientFd, trancheFmts);
+
+        WaylandMessageWriter trancheFlags(feedbackId, 6); // tranche_flags(flags)
+        trancheFlags.putUint32(0);
+        sendPacket(clientFd, trancheFlags);
+
+        WaylandMessageWriter done(feedbackId, 0); // done()
+        sendPacket(clientFd, done);
+    }
+
+    // Imports a client DMA-BUF and composites it onto the ANativeWindow.
+    // Primary path: AHardwareBuffer import (hypervisor gralloc); fallback: mmap of
+    // the linear DMA-BUF. The fallback guarantees a frame is shown even when the
+    // vendor gralloc rejects a raw native_handle.
+    bool importAndRenderDmabuf(const std::shared_ptr<DmabufBuffer>& buffer) {
+        if (!buffer || buffer->planes.empty()) return false;
+        const DmabufPlane& plane = buffer->planes[0];
+        if (plane.fd < 0 || buffer->width <= 0 || buffer->height <= 0) return false;
+
+        int blitFormat = -1;
+        if (buffer->format == DRM_FORMAT_ARGB8888) blitFormat = 0;
+        else if (buffer->format == DRM_FORMAT_XRGB8888) blitFormat = 1;
+        if (blitFormat < 0) {
+            LOGW("dmabuf: unsupported format 0x%x (only ARGB8888/XRGB8888 supported)", buffer->format);
+            return false;
+        }
+
+        // Primary: import as AHardwareBuffer (zero-copy gralloc path when accepted).
+        {
+            // Versioned native_handle_t: { version, numFds, numInts, data[] }.
+            // HyperOS gralloc may reject a raw dma-buf handle (missing private ints);
+            // in that case the mmap fallback below keeps the session rendering.
+            struct __attribute__((packed)) RawNativeHandle {
+                int32_t version;
+                int32_t numFds;
+                int32_t numInts;
+                int32_t fd;
+            } rawHandle = { static_cast<int32_t>(sizeof(RawNativeHandle)), 1, 0, plane.fd };
+
+            AHardwareBuffer_Desc desc = {};
+            desc.width = static_cast<uint32_t>(buffer->width);
+            desc.height = static_cast<uint32_t>(buffer->height);
+            desc.layers = 1;
+            desc.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
+            desc.usage = AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN;
+            desc.stride = static_cast<uint32_t>(buffer->width);
+
+            AHardwareBuffer* ahb = nullptr;
+            // AHardwareBuffer_createFromHandle() is a platform (libandroid) API, not NDK:
+            // resolve it at runtime; if unavailable the mmap fallback is used.
+            using CreateFromHandleFn = int (*)(const AHardwareBuffer_Desc*, const void*,
+                                               uint64_t, AHardwareBuffer**);
+            static CreateFromHandleFn s_createFromHandle = []() -> CreateFromHandleFn {
+                void* lib = dlopen("libandroid.so", RTLD_NOW | RTLD_LOCAL);
+                if (lib == nullptr) return nullptr;
+                return reinterpret_cast<CreateFromHandleFn>(
+                    dlsym(lib, "AHardwareBuffer_createFromHandle"));
+            }();
+
+            int rc = -1;
+            if (s_createFromHandle != nullptr) {
+                rc = s_createFromHandle(
+                    &desc, reinterpret_cast<const void*>(&rawHandle),
+                    AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN, &ahb);
+            }
+            if (rc == 0 && ahb != nullptr) {
+                void* data = nullptr;
+                int lockRc = AHardwareBuffer_lock(ahb, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+                                                  -1, nullptr, &data);
+                if (lockRc == 0 && data != nullptr) {
+                    int stride = static_cast<int>(buffer->width) * 4;
+                    const uint8_t* pixels = static_cast<const uint8_t*>(data) + plane.offset;
+                    blitBufferToWindow(pixels, buffer->width, buffer->height, stride, blitFormat);
+                    AHardwareBuffer_unlock(ahb, nullptr);
+                    AHardwareBuffer_release(ahb);
+                    static int s_ahbLog = 0;
+                    if (++s_ahbLog % 60 == 1) {
+                        LOGI("dmabuf: AHardwareBuffer import path active (%dx%d)", buffer->width, buffer->height);
+                    }
+                    return true;
+                }
+                AHardwareBuffer_release(ahb);
+            }
+            static int s_ahbFailLog = 0;
+            if (++s_ahbFailLog <= 3) {
+                LOGW("dmabuf: AHardwareBuffer_createFromHandle rejected (rc=%d); using mmap fallback", rc);
+            }
+        }
+
+        // Fallback: mmap the linear DMA-BUF and upload into the BufferQueue.
+        size_t length = static_cast<size_t>(plane.stride) * static_cast<size_t>(buffer->height)
+                        + plane.offset;
+        if (length == 0) length = static_cast<size_t>(buffer->width) * 4 * buffer->height;
+        void* mapped = mmap(nullptr, length, PROT_READ, MAP_SHARED, plane.fd, 0);
+        if (mapped == MAP_FAILED) {
+            LOGW("dmabuf: mmap failed (fd=%d len=%zu): %s", plane.fd, length, strerror(errno));
+            return false;
+        }
+        const uint8_t* pixels = static_cast<const uint8_t*>(mapped) + plane.offset;
+        blitBufferToWindow(pixels, buffer->width, buffer->height,
+                           static_cast<int>(plane.stride), blitFormat);
+        munmap(mapped, length);
+
+        static int s_mmapLog = 0;
+        if (++s_mmapLog % 60 == 1) {
+            LOGI("dmabuf: mmap fallback blit active (%dx%d stride=%u fmt=0x%x)",
+                 buffer->width, buffer->height, plane.stride, buffer->format);
+        }
+        return true;
     }
 
     // Process a single Wayland message from a client
@@ -1106,7 +1338,109 @@ private:
                     client.toplevelIconManagerId = newId;
                 } else if (iface == "zwp_keyboard_shortcuts_inhibit_manager_v1") {
                     client.shortcutsInhibitManagerId = newId;
+                } else if (iface == "zwp_linux_dmabuf_v1") {
+                    client.dmabufId = newId;
+                    // v1/v2 legacy format + v3 modifier events
+                    const uint32_t formats[2] = { DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888 };
+                    for (uint32_t fmt : formats) {
+                        WaylandMessageWriter f(newId, 0); // format
+                        f.putUint32(fmt);
+                        sendPacket(client.fd, f);
+
+                        WaylandMessageWriter mod(newId, 1); // modifier(format, hi, lo) (v3+)
+                        mod.putUint32(fmt);
+                        mod.putUint32(0); // modifier_hi
+                        mod.putUint32(0); // modifier_lo
+                        sendPacket(client.fd, mod);
+                    }
                 }
+            }
+            return;
+        }
+
+        // 2b. zwp_linux_dmabuf_v1 requests
+        if (client.dmabufId > 0 && objId == client.dmabufId) {
+            if (opcode == 0) {
+                client.dmabufId = 0;
+            } else if (opcode == 1) {
+                // create_params(new_id)
+                uint32_t paramsId = reader.readUint32();
+                DmabufParams params;
+                params.id = paramsId;
+                client.dmabufParams[paramsId] = params;
+            } else if (opcode == 2) {
+                // get_default_feedback(new_id)
+                uint32_t feedbackId = reader.readUint32();
+                client.dmabufFeedbacks.insert(feedbackId);
+                sendDmabufFeedback(client.fd, feedbackId);
+            } else if (opcode == 3) {
+                // get_surface_feedback(new_id, surface)
+                uint32_t feedbackId = reader.readUint32();
+                [[maybe_unused]] uint32_t surfaceId = reader.readUint32();
+                client.dmabufFeedbacks.insert(feedbackId);
+                sendDmabufFeedback(client.fd, feedbackId);
+            }
+            return;
+        }
+
+        // 2c. zwp_linux_dmabuf_feedback_v1 requests
+        if (client.dmabufFeedbacks.count(objId) > 0) {
+            if (opcode == 0) {
+                client.dmabufFeedbacks.erase(objId);
+            }
+            return;
+        }
+
+        // 2d. zwp_linux_buffer_params_v1 requests
+        auto paramsIt = client.dmabufParams.find(objId);
+        if (paramsIt != client.dmabufParams.end()) {
+            auto& params = paramsIt->second;
+            if (opcode == 0) {
+                client.dmabufParams.erase(paramsIt);
+            } else if (opcode == 1) {
+                // add(fd, plane_idx, offset, stride, modifier_hi, modifier_lo)
+                DmabufPlane plane;
+                plane.fd = client.pendingFd;
+                client.pendingFd = -1; // consumed
+                plane.planeIdx = reader.readUint32();
+                plane.offset = reader.readUint32();
+                plane.stride = reader.readUint32();
+                uint32_t modHi = reader.readUint32();
+                uint32_t modLo = reader.readUint32();
+                plane.modifier = (static_cast<uint64_t>(modHi) << 32) | modLo;
+                if (plane.fd < 0) {
+                    LOGE("dmabuf params.add without an fd (plane %u)", plane.planeIdx);
+                }
+                params.planes.push_back(plane);
+            } else if (opcode == 2 || opcode == 3) {
+                // create(new_id, width, height, format, flags) | create_immediate(...)
+                uint32_t bufferId = reader.readUint32();
+                int32_t width = reader.readInt32();
+                int32_t height = reader.readInt32();
+                uint32_t format = reader.readUint32();
+                uint32_t flags = reader.readUint32();
+
+                auto buf = std::make_shared<DmabufBuffer>();
+                buf->bufferId = bufferId;
+                buf->width = width;
+                buf->height = height;
+                buf->format = format;
+                buf->flags = flags;
+                buf->planes = std::move(params.planes);
+                params.planes.clear();
+                client.dmabufBuffers[bufferId] = buf;
+
+                LOGI("dmabuf buffer %u created: %dx%d fmt=0x%x planes=%zu (path=%s)",
+                     bufferId, width, height, format, buf->planes.size(),
+                     (opcode == 3 ? "immediate" : "deferred"));
+
+                if (opcode == 2) {
+                    // zwp_linux_buffer_params_v1.created(new_id)
+                    WaylandMessageWriter created(objId, 0);
+                    created.putUint32(bufferId);
+                    sendPacket(client.fd, created);
+                }
+                if (opcode == 2) client.dmabufParams.erase(paramsIt);
             }
             return;
         }
@@ -1182,6 +1516,15 @@ private:
             return;
         }
 
+        auto dmabufBufIt = client.dmabufBuffers.find(objId);
+        if (dmabufBufIt != client.dmabufBuffers.end()) {
+            if (opcode == 0) {
+                // wl_buffer.destroy: release imported plane fds
+                client.dmabufBuffers.erase(dmabufBufIt);
+            }
+            return;
+        }
+
         // 5. wl_compositor requests
         if (client.compositorId > 0 && objId == client.compositorId) {
             if (opcode == 0) {
@@ -1212,6 +1555,19 @@ private:
             } else if (opcode == 6) {
                 // wl_surface.commit() -> Blit the active window buffer!
                 if (surface.attachedBufferId > 0) {
+                    auto dbIt = client.dmabufBuffers.find(surface.attachedBufferId);
+                    if (dbIt != client.dmabufBuffers.end()) {
+                        const auto& dbuf = dbIt->second;
+                        bool isMainSurface = surface.isXdgSurface
+                                             || (!surface.isCursor && dbuf->width >= 320 && dbuf->height >= 240);
+                        if (isMainSurface) {
+                            importAndRenderDmabuf(dbuf);
+                        }
+                        // wl_buffer.release: the imported fd set is retained; the client may reuse
+                        WaylandMessageWriter releaseMsg(surface.attachedBufferId, 0);
+                        sendPacket(client.fd, releaseMsg);
+                    }
+
                     auto bIt = client.buffers.find(surface.attachedBufferId);
                     if (bIt != client.buffers.end()) {
                         const auto& buf = bIt->second;

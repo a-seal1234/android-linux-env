@@ -111,6 +111,23 @@ class ProotRunner(
             Log.w(TAG, "KGSL device node ${profile.gpu.kgslNode} is not accessible on host. Cleanly falling back to LLVMPIPE software rasterizer.")
         }
 
+        // Virtual DRM render node (TASK-024): the real /dev/dri/renderD128 exists on the
+        // host but is SELinux-labelled graphics_device, which untrusted_app cannot open.
+        // Bind the DMA-BUF system heap in its place; the android_dri PRoot extension
+        // spoofs the char-device stat and emulates DRM ioctls for this fd.
+        val dmaHeapNode = listOf("/dev/dma_heap/system", "/dev/dma_heap/qcom,system")
+            .firstOrNull { File(it).exists() }
+        if (dmaHeapNode != null) {
+            // Listable /dev/dri (the host directory is SELinux-denied for untrusted_app).
+            args.add("-b")
+            args.add("${fakeFsManager.devDriDir.absolutePath}:/dev/dri")
+            args.add("-b")
+            args.add("$dmaHeapNode:/dev/dri/renderD128")
+            if (!File(rootfsDir, "dev/dri").exists()) {
+                File(rootfsDir, "dev/dri").mkdirs()
+            }
+        }
+
         // 6. XDG runtime socket directory (wayland-0, PipeWire/PulseAudio socket)
         if (!sessionRuntimeDir.exists()) {
             sessionRuntimeDir.mkdirs()
@@ -256,6 +273,8 @@ class ProotRunner(
         runnerEnv["PROOT_TMP_DIR"] = dirs.prootTmpDir.absolutePath
         runnerEnv["PROOT_LOADER"] = dirs.loaderPath
         runnerEnv["PROOT_NO_SECCOMP"] = "1"
+        // Enable the android_dri PRoot extension (virtual /dev/dri/renderD128, TASK-024)
+        runnerEnv["ALW_ANDROID_DRI"] = "1"
         // Must be present in the host-side env as well: /usr/bin/env itself is a guest glibc
         // binary whose ld.so would register rseq (SIGSYS under Android 15+ seccomp) before
         // it ever exports GLIBC_TUNABLES to its children.

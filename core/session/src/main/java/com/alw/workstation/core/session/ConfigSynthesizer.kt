@@ -114,6 +114,11 @@ object ConfigSynthesizer {
             appendLine("env = LIBSEAT_BACKEND,noop")
             appendLine("env = GALLIUM_DRIVER,zink")
             appendLine("env = MESA_GL_VERSION_OVERRIDE,4.6")
+            appendLine()
+            appendLine("# Diagnostics: keep compositor/Aquamarine logs on stderr (visible in logcat)")
+            appendLine("debug {")
+            appendLine("    enable_stdout_logs = true")
+            appendLine("}")
         }
     }
 
