@@ -53,13 +53,19 @@ if [ -z "${'$'}DBUS_SESSION_BUS_ADDRESS" ]; then
     WRAPPER="dbus-run-session"
 fi
 
-# Nested KWin on the Android Wayland bridge: force the QPainter scene to avoid
-# GL renderer crashes (SIGSEGV) in the nested Turnip/Zink path.
-export KWIN_COMPOSE=Q
-export QT_QUICK_BACKEND=software
+# Nested KWin on the Android Wayland bridge: the KWin Wayland platform requires
+# OpenGL compositing (QPainter is unsupported -> "quitting KWin as it is broken").
+# The bridge exposes wl_shm only (no zwp_linux_dmabuf_v1), so force Mesa's software
+# wl_shm EGL path (llvmpipe). Zink would require dmabuf WSI and crash.
 export LIBGL_ALWAYS_SOFTWARE=1
+export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
+export GALLIUM_DRIVER=llvmpipe
+export WLR_RENDERER=pixman
+export QT_QUICK_BACKEND=software
+# Capture KWin's exact crash point in guest stderr
+export QT_LOGGING_RULES="kwin_*.debug=true;qt.qpa.wayland*.debug=true"
 
-exec ${'$'}WRAPPER kwin_wayland --wayland-display "${'$'}HOST_WAYLAND" --socket wayland-1 --width 3200 --height 2136 --scale 1.75 --no-lockscreen --no-global-shortcuts --xwayland --exit-with-session /usr/local/bin/plasma-session-start
+exec ${'$'}WRAPPER kwin_wayland --wayland-display "${'$'}HOST_WAYLAND" --socket wayland-1 --width 3200 --height 2136 --scale 1.75 --no-lockscreen --no-global-shortcuts --exit-with-session /usr/local/bin/plasma-session-start
 """
 
     const val SYSTEMCTL_SHIM = """#!/bin/bash

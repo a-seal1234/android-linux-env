@@ -861,6 +861,10 @@ private:
         m_globals.push_back({10, "wp_single_pixel_buffer_manager_v1", 1});
         m_globals.push_back({11, "wp_viewporter", 1});
         m_globals.push_back({12, "zwp_pointer_constraints_v1", 1});
+        // NOTE (TASK-023): KWin 6.8 and Aquamarine require zwp_linux_dmabuf_v1 (plus a DRM
+        // render node) before they will use any compositing at all, so these optional globals
+        // are not the cause of their refusal to start. wp_presentation is required by KWin's
+        // nested backend; xdg_toplevel_icon_manager_v1 was bisected harmless and is kept.
         m_globals.push_back({13, "wp_presentation", 1});
         m_globals.push_back({14, "xdg_toplevel_icon_manager_v1", 1});
         m_globals.push_back({15, "zwp_keyboard_shortcuts_inhibit_manager_v1", 1});

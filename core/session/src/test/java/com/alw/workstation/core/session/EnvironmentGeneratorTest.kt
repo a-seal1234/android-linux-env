@@ -39,6 +39,11 @@ class EnvironmentGeneratorTest {
         assertEquals("zink", env["MESA_LOADER_DRIVER_OVERRIDE"])
         assertEquals("zink", env["GALLIUM_DRIVER"])
         assertEquals("noconform", env["TU_DEBUG"])
+        assertEquals("4.6", env["MESA_GL_VERSION_OVERRIDE"])
+
+        // Hyprland nested-backend requirements (no logind/seatd, no DRM cursor plane)
+        assertEquals("noop", env["LIBSEAT_BACKEND"])
+        assertEquals("1", env["WLR_NO_HARDWARE_CURSORS"])
 
         // Audio bridge variables
         assertEquals("unix:/run/user/1000/pulse/native", env["PULSE_SERVER"])

@@ -46,6 +46,14 @@ object EnvironmentGenerator {
             StackProfile.CompositorType.CUSTOM -> "Wayland"
         }
 
+        // 2b. Hyprland / Aquamarine nested-backend requirements
+        if (profile.compositor.type == StackProfile.CompositorType.HYPRLAND) {
+            // No systemd-logind / seatd inside PRoot: force the noop libseat backend.
+            env["LIBSEAT_BACKEND"] = "noop"
+            // The Android Wayland bridge exposes no dedicated DRM cursor plane.
+            env["WLR_NO_HARDWARE_CURSORS"] = "1"
+        }
+
         // 3. Application toolkit Wayland flags
         env["ELECTRON_OZONE_PLATFORM_HINT"] = "wayland"
         env["MOZ_ENABLE_WAYLAND"] = "1"
@@ -72,6 +80,8 @@ object EnvironmentGenerator {
                 env["MESA_LOADER_DRIVER_OVERRIDE"] = "zink"
                 env["GALLIUM_DRIVER"] = "zink"
                 env["TU_DEBUG"] = "noconform"
+                // Aquamarine/EGL advertises GLES via Zink; expose the GL 4.6 surface level
+                env["MESA_GL_VERSION_OVERRIDE"] = "4.6"
             }
             StackProfile.DriverMode.ADRENO_PROPRIETARY_ZINK -> {
                 val icdPath = "/opt/drivers/turnip/active/adreno_icd.aarch64.json"

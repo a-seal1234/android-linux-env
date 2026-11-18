@@ -8,7 +8,7 @@
 **Planning workspace / branch / base:** `/media/DATA/project/android-linux-env` / `main`  
 **Write scope:** `bridge/wayland/`, `core/proot/`, `core/session/`, `app/`, `docs/tasks/TASK-023/`  
 **Risk:** Critical  
-**Status:** In Progress / On-Device Re-Verified (2026-11-17; launch pipeline fixed, desktop crash blocker remains)  
+**Status:** In Progress / Compositor Gate Identified (2026-11-18): Hyprland and KWin 6.8 both require `zwp_linux_dmabuf_v1` + a DRM render node, which the bridge/sandbox does not provide. SHM-based LabWC + Konsole render verified on-device.
 
 ---
 
@@ -42,14 +42,26 @@
 | **AC-04** | Provision KDE Plasma 6 & Konsole packages in guest rootfs | **Done** | Verified on device (`kwin 6.8.2`, `plasmashell 6.8.2`, `konsole`) |
 | **AC-05** | Adreno 825 Turnip KGSL hardware acceleration confirmed | **Done** | `vulkaninfo --summary` and `fastfetch` report Turnip Adreno 825 |
 | **AC-06** | Unit tests passing across all modules (`./gradlew test`) | **Done** | 159 tests passing cleanly |
-| **AC-07** | Live nested KDE Plasma 6 + Konsole desktop rendered at 3200x2136 | **Blocked (see AC-08)** | Session bootstraps: bridge↔KWin connected, `plasmashell`/`konsole` spawn; KWin SIGSEGV prevents rendering |
+| **AC-07** | Live nested KDE Plasma 6 + Konsole desktop rendered at 3200x2136 | **Blocked (AC-09)** | KWin 6.8 refuses to composite on this bridge — see AC-09 |
 | **AC-08** | In-app Signal 31 / exit 255 root cause & fix (2026-11-17) | **Done** | Zygote `untrusted_app` seccomp traps PRoot `SYSCALL_AVOIDER (x8=-1)` and guest `rseq` before PRoot can rewrite them (`run-as` unaffected, AT_SECURE=0 vs 1). Fixed by rebuilding `lib_proot.so` from proot v5.4.0 with a SIGSYS-suppression patch in `tracee/event.c` (aborted syscalls degrade to `-ENOSYS`), `unsetenv(LD_LIBRARY_PATH/LD_PRELOAD)` in `pty_bridge.cpp`, and `GLIBC_TUNABLES=glibc.pthread.rseq=0` hardening. [Patch](evidence/proot-android16-sigsys.patch) |
-| **AC-09** | KWin guest-side SIGSEGV ~8-10s into desktop | **Open** | All KWin instances (vpid status 139), silent, no stderr; occurs with `KWIN_COMPOSE=Q` (software) too; blocks AC-07 screen capture. Suspects: `wayland_bridge.cpp` protocol conformance (`wp_presentation`/dmabuf) or nested Turnip/EGL path. Requires dedicated debug session. |
+| **AC-09** | KWin 6.8 compositing gate (root-caused 2026-11-18) | **Blocked (hard)** | `WaylandBackend::supportedCompositors()` (kwin v6.8.2 `src/backends/wayland/wayland_backend.cpp:608`) only offers OpenGL when `m_display->linuxDmabuf() && m_renderDevice`. The bridge exposes no `zwp_linux_dmabuf_v1`, and the sandbox has no DRM render node (`/dev/dri` is absent; only `/dev/kgsl-3d0`), so `GpuManager::compatibleRenderDevice()` finds nothing. KWin logs "Configured compositor not supported by Platform… quitting KWin now as it is broken" and exits 0 (no more SIGSEGV once llvmpipe/EGL replaces zink). Requires implementing linux-dmabuf **and** a DRM render-node/buffer-export shim — major work. |
+| **AC-10** | Hyprland/Aquamarine evaluation (2026-11-18) | **Blocked (hard)** | Hyprland 0.57.2 loads the synthesized session config and reaches backend init, then aborts with `CBackend::create() failed!`. Aquamarine v0.16.0 `src/backend/Wayland.cpp` requires `zwp_linux_dmabuf_v1` and `linux_dmabuf feedback mainDevice` → fails identically to KWin. Config mitigations are in place (`LIBSEAT_BACKEND=noop`, no Xwayland, `no_hardware_cursors`, float rule, waybar+konsole autostart, `GALLIUM_DRIVER=zink`, `MESA_GL_VERSION_OVERRIDE=4.6`), and EGL itself works on the bridge (llvmpipe GL 4.6 / ES 3.2 via `eglinfo`). |
+| **AC-11** | SHM desktop render verification (2026-11-18) | **Done** | LabWC 0.20.2 (pixman) + Konsole 26.8.3 (Qt software) render end-to-end at 3200x2136 with `fastfetch` showing Arch Linux ARM, 655 packages, Adreno 825. Proves the proot/PTY/bridge/wl_shm pipeline. [Screenshot](evidence/screen_labwc_konsole_shm.png) |
 
 ---
 
 ## 3. Resume / Handoff Steps
 
 1. ~~Verify device connection / install APK / trigger session~~ — done 2026-11-17.
-2. **Next: debug the KWin guest-side SIGSEGV (AC-09).** Captured facts: KWin connects to the host Wayland bridge and serves `wayland-1`; `plasmashell`/`konsole` spawn; all KWin instances die with SIGSEGV (proot vpid status 139) ~8-10s after start, with zero stderr output, even with `KWIN_COMPOSE=Q` and `QT_QUICK_BACKEND=software`. Debug approach: enable `QT_LOGGING_RULES="*.debug=true"` in `RiceShimGenerator.PLASMA_SESSION_START_SHIM` and re-run (guest stderr is the fastest observation channel); audit `wayland_bridge.cpp` protocol implementations (`wp_presentation` timestamps, `zwp_linux_dmabuf`, shm buffer lifecycle) against KWin 6.8.2 expectations; bisect with `--xwayland` disabled.
-3. Once KWin survives: capture `adb exec-out screencap -p > docs/tasks/TASK-023/evidence/screen_kde_plasma_turnip.png`, mark Done, commit.
+2. ~~Evaluate Hyprland as primary compositor~~ — done 2026-11-18 (AC-10): blocked by Aquamarine's
+   `zwp_linux_dmabuf_v1` requirement; matches KWin's gate in AC-09.
+3. ~~KWin 6.8 bisect~~ — done 2026-11-18 (AC-09): `--xwayland` removed, `QT_LOGGING_RULES`
+   enabled, optional protocol globals bisected harmless; the blocker is the platform's
+   `supportedCompositors()` gate (`linuxDmabuf()` + DRM render device), not malformed events.
+4. **Next (major):** implement `zwp_linux_dmabuf_v1` in `wayland_bridge.cpp` **and** a DRM
+   render-node / buffer-export shim (AHardwareBuffer import from dma-buf, `linux-dmabuf`
+   feedback mainDevice) so KWin/Aquamarine can composite. Alternative: keep the SHM-only
+   bridge and adopt LabWC (pixman) as the always-available desktop, documenting GPU
+   acceleration as requiring the dmabuf work.
+5. Rendered-desktop evidence for the current SHM path: `evidence/screen_labwc_konsole_shm.png`
+   (LabWC 0.20.2 + Konsole 26.8.3 + fastfetch, 3200x2136).

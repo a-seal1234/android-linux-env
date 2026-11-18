@@ -44,6 +44,16 @@ class ConfigSynthesizerTest {
         // 6. Nested Wayland backend environment
         assertTrue(config.contains("env = AQ_BACKEND,wayland"))
         assertTrue(config.contains("env = WLR_BACKENDS,wayland"))
+
+        // 7. PRoot / Android Wayland bridge mitigations
+        assertTrue(config.contains("enabled = false")) // xwayland disabled
+        assertTrue(config.contains("no_hardware_cursors = true"))
+        assertTrue(config.contains("monitor = , 3200x2136@60, 0x0, 1.75"))
+        assertTrue(config.contains("windowrulev2 = float, class:.*"))
+        assertTrue(config.contains("env = LIBSEAT_BACKEND,noop"))
+        assertTrue(config.contains("env = WLR_NO_HARDWARE_CURSORS,1"))
+        assertTrue(config.contains("env = MESA_GL_VERSION_OVERRIDE,4.6"))
+        assertTrue(config.contains("exec-once = konsole --hold -e /bin/bash -c \"fastfetch; glxinfo -B; exec bash\" &"))
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.alw.workstation.core.proot
 
 import android.util.Log
 import com.alw.workstation.core.proot.model.BindMount
+import com.alw.workstation.core.session.ConfigSynthesizer
 import com.alw.workstation.core.session.EnvironmentGenerator
 import com.alw.workstation.core.session.model.StackProfile
 import java.io.File
@@ -82,6 +83,17 @@ class ProotRunner(
         for (mount in fakeFsManager.getBindMounts()) {
             args.add("-b")
             args.add(mount.toCliArg())
+        }
+
+        // Materialize the synthesized session override config inside the bind-mounted /tmp.
+        // The rootfs copy written by CompositorOrchestrator is shadowed by the fakefs /tmp
+        // bind mount, so the compositor would otherwise never see /tmp/android-session.conf.
+        if (profile.compositor.configMode == StackProfile.ConfigMode.WRAP_AND_OVERRIDE) {
+            val sessionConfigName = File(profile.compositor.sessionConfigPath).name
+            val sessionConfigFile = File(fakeFsManager.tmpDir, sessionConfigName)
+            sessionConfigFile.writeText(
+                ConfigSynthesizer.synthesizeHyprlandConfig(profile)
+            )
         }
 
         // Materialize PRoot rice compatibility shims (systemctl, fakeroot, makepkg, sudo) in /usr/local/bin

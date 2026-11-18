@@ -239,12 +239,24 @@ class DashboardViewModel(
             StackProfile.CompositorType.HYPRLAND -> "Hyprland"
             StackProfile.CompositorType.CUSTOM -> currentProfile.compositor.execCommand
         }
-        val updated = currentProfile.copy(
-            compositor = currentProfile.compositor.copy(
+        val compositor = if (type == StackProfile.CompositorType.HYPRLAND) {
+            // Use the synthesized /tmp/android-session.conf (sources the user config and layers
+            // the PRoot/bridge overrides: no Xwayland, software cursors, nested Aquamarine env).
+            currentProfile.compositor.copy(
+                type = type,
+                execCommand = exec,
+                configMode = StackProfile.ConfigMode.WRAP_AND_OVERRIDE,
+                userConfigPath = "/home/${currentProfile.distro.defaultUser}/.config/hypr/hyprland.conf",
+                sessionConfigPath = "/tmp/android-session.conf",
+                extraArgs = listOf("-c", "/tmp/android-session.conf", "--i-am-really-stupid")
+            )
+        } else {
+            currentProfile.compositor.copy(
                 type = type,
                 execCommand = exec
             )
-        )
+        }
+        val updated = currentProfile.copy(compositor = compositor)
         profileRepository.saveProfile(updated)
         _uiState.update { it.copy(activeProfile = updated) }
         refresh()
