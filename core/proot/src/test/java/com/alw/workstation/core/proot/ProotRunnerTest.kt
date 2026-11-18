@@ -64,8 +64,8 @@ class ProotRunnerTest {
         // Check Turnip KGSL driver env vars
         assertTrue(envArgs.any { it.startsWith("VK_ICD_FILENAMES=/opt/drivers/turnip/active/freedreno_icd.aarch64.json") })
         assertTrue(envArgs.any { it.startsWith("VK_DRIVER_FILES=/opt/drivers/turnip/active/freedreno_icd.aarch64.json") })
-        assertTrue(envArgs.any { it.startsWith("MESA_LOADER_DRIVER_OVERRIDE=zink") })
-        assertTrue(envArgs.any { it.startsWith("GALLIUM_DRIVER=zink") })
+        assertTrue(envArgs.any { it.startsWith("MESA_LOADER_DRIVER_OVERRIDE=kms_swrast") })
+        assertTrue(envArgs.none { it.startsWith("GALLIUM_DRIVER=") })
         assertTrue(envArgs.any { it.startsWith("TU_DEBUG=noconform") })
 
         // Check compositor exec with D-Bus session wrapping
@@ -144,8 +144,9 @@ class ProotRunnerTest {
 
         val envArgs = cmd.arguments.filter { it.contains("=") }
         assertTrue(envArgs.any { it.startsWith("VK_ICD_FILENAMES=/opt/drivers/turnip/active/adreno_icd.aarch64.json") })
-        assertTrue(envArgs.any { it.startsWith("MESA_LOADER_DRIVER_OVERRIDE=zink") })
-        assertTrue(envArgs.any { it.startsWith("GALLIUM_DRIVER=zink") })
+        // Hyprland compositor is pinned to kms_swrast on the virtual DRM node
+        assertTrue(envArgs.any { it.startsWith("MESA_LOADER_DRIVER_OVERRIDE=kms_swrast") })
+        assertTrue(envArgs.none { it.startsWith("GALLIUM_DRIVER=") })
     }
 
     @Test

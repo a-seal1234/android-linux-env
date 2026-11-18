@@ -36,10 +36,11 @@ class EnvironmentGeneratorTest {
         // Turnip KGSL variables
         assertEquals("/opt/drivers/turnip/active/freedreno_icd.aarch64.json", env["VK_ICD_FILENAMES"])
         assertEquals("/opt/drivers/turnip/active/freedreno_icd.aarch64.json", env["VK_DRIVER_FILES"])
-        assertEquals("zink", env["MESA_LOADER_DRIVER_OVERRIDE"])
-        assertEquals("zink", env["GALLIUM_DRIVER"])
+        assertEquals("kms_swrast", env["MESA_LOADER_DRIVER_OVERRIDE"])
+        assertNull(env["GALLIUM_DRIVER"])
         assertEquals("noconform", env["TU_DEBUG"])
         assertEquals("4.6", env["MESA_GL_VERSION_OVERRIDE"])
+        assertEquals("0", env["LIBGL_ALWAYS_SOFTWARE"])
 
         // Hyprland nested-backend requirements (no logind/seatd, no DRM cursor plane)
         assertEquals("noop", env["LIBSEAT_BACKEND"])
@@ -63,6 +64,22 @@ class EnvironmentGeneratorTest {
 
         assertEquals("/opt/drivers/turnip/active/adreno_icd.aarch64.json", env["VK_ICD_FILENAMES"])
         assertEquals("/opt/drivers/turnip/active/adreno_icd.aarch64.json", env["VK_DRIVER_FILES"])
+        // Hyprland compositor is pinned to the virtual node's kms_swrast GBM path
+        assertEquals("kms_swrast", env["MESA_LOADER_DRIVER_OVERRIDE"])
+        assertNull(env["GALLIUM_DRIVER"])
+    }
+
+    @Test
+    fun testNonHyprlandCompositorKeepsZinkDriver() {
+        // KWin/Plasma profiles keep the Turnip/Zink driver selection (no compositor split)
+        val profile = StackProfile.defaultArchXiaomiPad8().copy(
+            compositor = StackProfile.defaultArchXiaomiPad8().compositor.copy(
+                type = StackProfile.CompositorType.PLASMA,
+                execCommand = "startplasma-wayland"
+            )
+        )
+        val env = EnvironmentGenerator.generateEnvironment(profile, File("/tmp/runtime-plasma"))
+
         assertEquals("zink", env["MESA_LOADER_DRIVER_OVERRIDE"])
         assertEquals("zink", env["GALLIUM_DRIVER"])
     }

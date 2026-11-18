@@ -52,7 +52,9 @@ class ConfigSynthesizerTest {
         assertTrue(config.contains("windowrulev2 = float, class:.*"))
         assertTrue(config.contains("env = LIBSEAT_BACKEND,noop"))
         assertTrue(config.contains("env = WLR_NO_HARDWARE_CURSORS,1"))
-        assertTrue(config.contains("env = MESA_GL_VERSION_OVERRIDE,4.6"))
+        // The compositor must stay on the kms_swrast loader override: no explicit
+        // gallium driver is exported in the session config.
+        assertFalse(config.contains("env = GALLIUM_DRIVER,zink"))
         assertTrue(config.contains("exec-once = konsole --hold -e /bin/bash -c \"fastfetch; glxinfo -B; exec bash\" &"))
     }
 

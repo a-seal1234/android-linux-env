@@ -8,7 +8,7 @@
 **Planning workspace / branch / base:** `/media/DATA/project/android-linux-env` / `main`  
 **Write scope:** `core/proot/` (vendored `lib_proot.so` + rebuilt proot sources), `bridge/wayland/`, `core/session/`, `docs/tasks/TASK-024/`  
 **Risk:** Critical  
-**Status:** In Progress — Stages 1–3 implemented and verified on-device (virtual DRM node, GBM/PRIME export, `zwp_linux_dmabuf_v1` v4, DMA-BUF compositing). Compositor unlock blocked on a Mesa `dri_gbm` segfault on the virtual node (AC-07/AC-08).
+**Status:** In Progress — Aquamarine `CBackend::start()` now succeeds and Hyprland composites its first 3200x2136 DMA-BUF frame through the bridge; Hyprland then stalls before creating its IPC socket / rendering further frames, so no interactive desktop yet.
 **Depends on:** TASK-023 (AC-08..AC-11: in-app PRoot works, SIGSYS suppressed, SHM desktop verified).  
 **Fallback preserved:** the LabWC Safe Mode profile (pixman / `wl_shm`) must remain fully functional.
 
@@ -83,10 +83,11 @@ render node inside the guest, backed by Android's DMA-BUF heap:
 | **AC-04** | `zwp_linux_dmabuf_v1` v4 + feedback global advertised; format table over `memfd` | **Done** — Aquamarine log: `Got format AR24/XR24 with modifier LINEAR`, `Got main device`, `Got done` |
 | **AC-05** | DMA-BUF `wl_buffer` imported and composited (EGL primary path, mmap fallback) | **Done (mmap fallback)** — `dmabuf: AHardwareBuffer_createFromHandle rejected (rc=5); using mmap fallback`, `mmap fallback blit active (640x480)` |
 | **AC-06** | Standalone dmabuf EGL client renders through `wayland-0` | **Done** — `alw-dmabuf-client` allocates from `/dev/dma_heap/system`, submits `zwp_linux_dmabuf_v1`, `DMABUF_CLIENT_OK`; screen shows the gradient ([screenshot](evidence/screen_dmabuf_client.png)) |
-| **AC-07** | Hyprland passes `CBackend::create()` and renders desktop + Konsole | **Blocked** — Aquamarine now passes registry/dmabuf/feedback/main-device/node-open and reaches `CGBMAllocator::create()`; `gbm_create_device` inside that path **segfaults in Mesa's `dri_gbm.so`** on the virtual node (proot: `terminated with signal 11`). See [aquamarine probe](evidence/aquamarine_probe.cpp) output in §6. |
+| **AC-07** | Hyprland passes `CBackend::create()` and renders desktop + Konsole | **Partial** — `CBackend::create()` **and** `CBackend::start()` now succeed (`CBackend::start() = 1`, [probe output](evidence/aquamarine_probe_success.txt)); Hyprland runs, initializes EGL on the virtual node, exports a real 3200x2136 XRGB8888 DMA-BUF and the bridge composites it (`Blitted frame #1`, [frames log](evidence/hyprland_bridge_frames.log)). Hyprland then stalls before creating its IPC socket (`.socket.sock` absent) and stops committing frames — desktop/Konsole not yet visible. |
 | **AC-08** | KWin 6.8 passes `supportedCompositors()` and renders Plasma + Konsole | **Blocked (same gate)** — KWin needs a `RenderDevice` from `GpuManager` (libdrm enumeration/udev) and an EGL/GBM context, which hits the same Mesa `dri_gbm` crash. |
 | **AC-09** | LabWC Safe Mode (SHM) remains functional | **Done** — LabWC 0.20.2 + Konsole 26.8.3 render normally; default profile left on LABWC |
-| **AC-10** | Unit tests pass; screenshot evidence captured; commit pushed to `origin/main` | **Done** — `./gradlew test` green; evidence in `docs/tasks/TASK-024/evidence/`; commit pushed |
+| **AC-10** | Unit tests pass; screenshot evidence captured; commit pushed to `origin/main` | **Done (partial screenshot)** — `./gradlew test` green; evidence in `docs/tasks/TASK-024/evidence/`; commit pushed. Hyprland desktop screenshot still pending (AC-07). |
+| **AC-12** | `drmGetDevice2` interposer + KMS capability constants + compositor/app GBM driver split | **Done** — `libalw_drm.so` now interposes `drmGetDevice2` (delegating to the real symbol for non-virtual fds) and provides valid businfo/deviceinfo in the synthetic `drmDevice`; `android_dri` reports `TIMESTAMP_MONOTONIC=1` and `ADDFB2_MODIFIERS=1` and emulates `MODE_GETRESOURCES`/`GETCRTC`/`SETCRTC`/`ADDFB`/`ADDFB2`/`RMFB`/`SET|DROP_MASTER`; the compositor runs with `MESA_LOADER_DRIVER_OVERRIDE=kms_swrast` and **no** `GALLIUM_DRIVER`/`LIBGL_ALWAYS_SOFTWARE=1` (both break EGL-on-GBM on the virtual node). LabWC Safe Mode untouched. |
 
 ## 5. Verified on-device evidence (Xiaomi Pad 8, `d370854b`)
 
@@ -121,19 +122,20 @@ reopenDRMNode: opening node /dev/dri/renderD128
 
 ## 6. Remaining blockers (next increment)
 
-1. **Mesa `dri_gbm`/loader crash on the virtual node** — the loader resolves the
-   driver via `/proc/fdinfo`/sysfs (absent) and falls back to `dri_gbm.so`, which
-   segfaults during screen creation on a node that only implements the GEM/PRIME
-   ioctl subset. Options: implement the missing ioctls (`GET_RESOURCES`,
-   `GET_CAP` extras, `PRIME` import) and/or interpose the Mesa loader with a
-   forced `swrast`/`kms_swrast` driver path; or provide a userspace "vgem" shim
-   library (`vgem_gbm.so`) matching Mesa's expectations.
-2. **AHardwareBuffer import** — HyperOS gralloc rejects the raw `native_handle`
-   (`rc=5`); the mmap fallback composites correctly. Resolving the vendor handle
-   layout would give a true GPU zero-copy present path.
-3. With (1) fixed, Hyprland/KWin should pass their allocator gates and reach
-   renderer initialization (Turnip is available for guest Vulkan; the compositor
-   GL path must use the virtual node's GBM/swrast).
+1. **Hyprland render-loop stall after the first frame** — Hyprland starts, EGL
+   initializes and one DMA-BUF frame is committed/blitted, but it never creates
+   `$XDG_RUNTIME_DIR/hypr/<sig>/.socket.sock` and issues no further commits.
+   Observed: `EGL setup failed, disabling glamor` (Xwayland, expected with
+   `xwayland.enabled=false`), Hyprland parked in `epoll_wait`. Suspects: the
+   bridge's `wp_presentation`/frame-callback sequencing for the compositor's own
+   output surface, or its need for a `wl_surface.enter`/output `done` roundtrip
+   before driving the render loop solely from damage.
+2. **AHardwareBuffer import** — HyperOS gralloc still rejects the raw
+   `native_handle` (`rc=5`); the mmap fallback composites correctly (and is what
+   renders Hyprland's frame). Resolving the vendor handle layout would give a
+   true GPU zero-copy present path.
+3. **KWin** — needs `GpuManager` render-device enumeration (libdrm/udev) and its
+   own EGL/GBM init; the same kms_swrast path applies once (1) is resolved.
 
 ## 4. Verification Plan
 

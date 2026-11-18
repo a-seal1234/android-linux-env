@@ -112,8 +112,11 @@ object ConfigSynthesizer {
             appendLine("env = AQ_NO_MODIFIERS,1")
             appendLine("# PRoot has no systemd-logind/seatd session; Hyprland must use the noop seat backend")
             appendLine("env = LIBSEAT_BACKEND,noop")
-            appendLine("env = GALLIUM_DRIVER,zink")
-            appendLine("env = MESA_GL_VERSION_OVERRIDE,4.6")
+            // NOTE: do not export GALLIUM_DRIVER / MESA_LOADER_DRIVER_OVERRIDE here.
+            // Hyprland applies `env` entries to its own process too, and any explicit
+            // gallium driver (zink/llvmpipe) breaks EGL init on the virtual vgem node
+            // (the compositor must stay on the kms_swrast loader override). Child
+            // applications still reach Turnip through VK_ICD_FILENAMES.
             appendLine()
             appendLine("# Diagnostics: keep compositor/Aquamarine logs on stderr (visible in logcat)")
             appendLine("debug {")

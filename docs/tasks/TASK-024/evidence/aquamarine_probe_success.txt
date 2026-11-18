@@ -1,0 +1,354 @@
+proot info: binding = /dev/dma_heap/system:/dev/dri/renderD128
+proot info: binding = /data/user/0/com.alw.workstation/files/fakefs/dev/dri:/dev/dri
+proot info: binding = /data/user/0/com.alw.workstation/files/fakefs/tmp:/tmp
+proot info: binding = /sys
+proot info: binding = /dev
+proot info: binding = /proc
+proot info: binding = /data/user/0/com.alw.workstation/files/rootfs/archlinux-default:/
+proot info: vpid 1: translate("/" + "/usr/bin/env")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/bin/env"
+proot info: vpid 1: translate("/" + "/usr/bin/env")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/bin/env"
+proot info: exe = /usr/bin/env
+proot info: argv = /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/root XDG_RUNTIME_DIR=/tmp/runtime-alw WAYLAND_DISPLAY=wayland-0 LIBSEAT_BACKEND=noop AQ_BACKEND=wayland LIBGL_ALWAYS_SOFTWARE=1 MESA_LOADER_DRIVER_OVERRIDE=kms_swrast GALLIUM_DRIVER=llvmpipe /tmp/aqprobe
+proot info: initial cwd = /root
+proot info: verbose level = 2
+proot info: pid 6189: access to "/proc/6189/fd" (fd 3) won't be translated until closed
+proot info: vpid 1: translate("/" + "/usr/bin/env")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/bin/env"
+proot info: vpid 1: translate("/" + "/lib/ld-linux-aarch64.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/ld-linux-aarch64.so.1"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/bin/env (st=13)
+proot info: vpid 1: translate("/" + "/usr/bin/env")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/bin/env"
+proot info: android_dri: open enter pid=6190 sys=214 path=/lib/ld-linux-aarch64.so.1 (st=27)
+proot info: vpid 1: translate("/" + "/lib/ld-linux-aarch64.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/ld-linux-aarch64.so.1"
+proot info: vpid 1: translate("/" + "/etc/ld.so.preload")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/etc/ld.so.preload"
+proot info: android_dri: open enter pid=6190 sys=214 path=/etc/ld.so.preload (st=19)
+proot info: vpid 1: translate("/" + "/etc/ld.so.preload")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/etc/ld.so.preload"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libalw_shim.so (st=24)
+proot info: vpid 1: translate("/" + "/usr/lib/libalw_shim.so")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libalw_shim.so"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libalw_drm.so (st=23)
+proot info: vpid 1: translate("/" + "/usr/lib/libalw_drm.so")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libalw_drm.so"
+proot info: android_dri: open enter pid=6190 sys=214 path=/etc/ld.so.cache (st=17)
+proot info: vpid 1: translate("/" + "/etc/ld.so.cache")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/etc/ld.so.cache"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libc.so.6 (st=19)
+proot info: vpid 1: translate("/" + "/usr/lib/libc.so.6")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libc.so.6"
+proot info: vpid 1: translate("/" + "/tmp/aqprobe")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/fakefs/tmp/aqprobe"
+proot info: vpid 1: translate("/" + "/lib/ld-linux-aarch64.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/ld-linux-aarch64.so.1"
+proot info: android_dri: open enter pid=6190 sys=214 path=/tmp/aqprobe (st=13)
+proot info: vpid 1: translate("/" + "/tmp/aqprobe")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/fakefs/tmp/aqprobe"
+proot info: android_dri: open enter pid=6190 sys=214 path=/lib/ld-linux-aarch64.so.1 (st=27)
+proot info: vpid 1: translate("/" + "/lib/ld-linux-aarch64.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/ld-linux-aarch64.so.1"
+proot info: vpid 1: translate("/" + "/etc/ld.so.preload")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/etc/ld.so.preload"
+proot info: android_dri: open enter pid=6190 sys=214 path=/etc/ld.so.preload (st=19)
+proot info: vpid 1: translate("/" + "/etc/ld.so.preload")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/etc/ld.so.preload"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libalw_shim.so (st=24)
+proot info: vpid 1: translate("/" + "/usr/lib/libalw_shim.so")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libalw_shim.so"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libalw_drm.so (st=23)
+proot info: vpid 1: translate("/" + "/usr/lib/libalw_drm.so")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libalw_drm.so"
+proot info: android_dri: open enter pid=6190 sys=214 path=/etc/ld.so.cache (st=17)
+proot info: vpid 1: translate("/" + "/etc/ld.so.cache")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/etc/ld.so.cache"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libaquamarine.so.15 (st=29)
+proot info: vpid 1: translate("/" + "/usr/lib/libaquamarine.so.15")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libaquamarine.so.0.16.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libhyprutils.so.13 (st=28)
+proot info: vpid 1: translate("/" + "/usr/lib/libhyprutils.so.13")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libhyprutils.so.0.14.3"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libpixman-1.so.0 (st=26)
+proot info: vpid 1: translate("/" + "/usr/lib/libpixman-1.so.0")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libpixman-1.so.0.46.4"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libdrm.so.2 (st=21)
+proot info: vpid 1: translate("/" + "/usr/lib/libdrm.so.2")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libdrm.so.2.134.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libstdc++.so.6 (st=24)
+proot info: vpid 1: translate("/" + "/usr/lib/libstdc++.so.6")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libstdc++.so.6.0.35"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libgcc_s.so.1 (st=23)
+proot info: vpid 1: translate("/" + "/usr/lib/libgcc_s.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libgcc_s.so.1"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libc.so.6 (st=19)
+proot info: vpid 1: translate("/" + "/usr/lib/libc.so.6")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libc.so.6"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libEGL.so.1 (st=21)
+proot info: vpid 1: translate("/" + "/usr/lib/libEGL.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libEGL.so.1.1.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libGLESv2.so.2 (st=24)
+proot info: vpid 1: translate("/" + "/usr/lib/libGLESv2.so.2")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libGLESv2.so.2.1.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libseat.so.1 (st=22)
+proot info: vpid 1: translate("/" + "/usr/lib/libseat.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libseat.so.1"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libinput.so.10 (st=24)
+proot info: vpid 1: translate("/" + "/usr/lib/libinput.so.10")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libinput.so.10.13.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libwayland-client.so.0 (st=32)
+proot info: vpid 1: translate("/" + "/usr/lib/libwayland-client.so.0")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libwayland-client.so.0.26.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libgbm.so.1 (st=21)
+proot info: vpid 1: translate("/" + "/usr/lib/libgbm.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libgbm.so.1.0.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libudev.so.1 (st=22)
+proot info: vpid 1: translate("/" + "/usr/lib/libudev.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libudev.so.1.7.14"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libdisplay-info.so.3 (st=30)
+proot info: vpid 1: translate("/" + "/usr/lib/libdisplay-info.so.3")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libdisplay-info.so.0.3.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libm.so.6 (st=19)
+proot info: vpid 1: translate("/" + "/usr/lib/libm.so.6")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libm.so.6"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libGLdispatch.so.0 (st=28)
+proot info: vpid 1: translate("/" + "/usr/lib/libGLdispatch.so.0")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libGLdispatch.so.0.0.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libsystemd.so.0 (st=25)
+proot info: vpid 1: translate("/" + "/usr/lib/libsystemd.so.0")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libsystemd.so.0.44.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libmtdev.so.1 (st=23)
+proot info: vpid 1: translate("/" + "/usr/lib/libmtdev.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libmtdev.so.1.0.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libevdev.so.2 (st=23)
+proot info: vpid 1: translate("/" + "/usr/lib/libevdev.so.2")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libevdev.so.2.3.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libwacom.so.9 (st=23)
+proot info: vpid 1: translate("/" + "/usr/lib/libwacom.so.9")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libwacom.so.9.0.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/liblua5.4.so.5.4 (st=26)
+proot info: vpid 1: translate("/" + "/usr/lib/liblua5.4.so.5.4")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/liblua5.4.so.5.4.9"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libffi.so.8 (st=21)
+proot info: vpid 1: translate("/" + "/usr/lib/libffi.so.8")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libffi.so.8.4.1"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libexpat.so.1 (st=23)
+proot info: vpid 1: translate("/" + "/usr/lib/libexpat.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libexpat.so.1.12.2"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libgudev-1.0.so.0 (st=27)
+proot info: vpid 1: translate("/" + "/usr/lib/libgudev-1.0.so.0")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libgudev-1.0.so.0.3.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libgobject-2.0.so.0 (st=29)
+proot info: vpid 1: translate("/" + "/usr/lib/libgobject-2.0.so.0")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libgobject-2.0.so.0.8800.3"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libglib-2.0.so.0 (st=26)
+proot info: vpid 1: translate("/" + "/usr/lib/libglib-2.0.so.0")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libglib-2.0.so.0.8800.3"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libpcre2-8.so.0 (st=25)
+proot info: vpid 1: translate("/" + "/usr/lib/libpcre2-8.so.0")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libpcre2-8.so.0.15.0"
+[AQ 1] Creating an Aquamarine backend!
+CBackend::create() = 0x300004f4f0
+[AQ 1] Starting the Aquamarine backend!
+[AQ 1] Starting the Wayland backend!
+proot info: vpid 1: translate("/" + "/tmp/runtime-alw/wayland-0")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/fakefs/tmp/runtime-alw/wayland-0"
+[AQ 1] Connected to a wayland compositor: unknown (XDG_CURRENT_DEKSTOP unset?)
+[AQ 1] Got registry at 0x3000050bd0
+[AQ 1] New wayland keyboard wl_keyboard
+[AQ 1] New wayland pointer wl_pointer
+[AQ 1] zwp_linux_dmabuf_v1: Got format AR24 with modifier LINEAR
+[AQ 1] zwp_linux_dmabuf_v1: Got format XR24 with modifier LINEAR
+[AQ 1] zwp_linux_dmabuf_v1: Got main device
+[AQ 1] zwp_linux_dmabuf_v1: Got node /dev/dri/renderD128
+[AQ 1] zwp_linux_dmabuf_v1: Got done
+proot info: android_dri: open enter pid=6190 sys=214 path=/dev/dri/renderD128 (st=20)
+proot info: android_dri: virtual DRM open detected
+proot info: vpid 1: translate("/" + "/dev/dri/renderD128")
+proot info: vpid 1:          -> "/dev/dma_heap/system"
+proot info: android_dri: tracked virtual DRM fd 7 (pid 6190)
+[AQ 1] zwp_linux_dmabuf_v1: opened node /dev/dri/renderD128 with fd 7
+[AQ 1] Output WAYLAND-1: initialized
+proot info: vpid 1: translate("/" + "/proc/self/fd/7")
+proot info: vpid 1:          -> "/proc/6190/fd/7"
+[AQ 1] reopenDRMNode: opening node /dev/dri/renderD128
+proot info: android_dri: open enter pid=6190 sys=214 path=/dev/dri/renderD128 (st=20)
+proot info: android_dri: virtual DRM open detected
+proot info: vpid 1: translate("/" + "/dev/dri/renderD128")
+proot info: vpid 1:          -> "/dev/dma_heap/system"
+proot info: android_dri: tracked virtual DRM fd 8 (pid 6190)
+proot info: android_dri: ioctl on virtual DRM fd 8
+proot info: android_dri: ioctl on virtual DRM fd 8
+proot info: android_dri: ioctl on virtual DRM fd 8
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/gbm/vgem_gbm.so (st=25)
+proot info: vpid 1: translate("/" + "/usr/lib/gbm/vgem_gbm.so")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/gbm/vgem_gbm.so"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/gbm/dri_gbm.so (st=24)
+proot info: vpid 1: translate("/" + "/usr/lib/gbm/dri_gbm.so")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/gbm/dri_gbm.so"
+proot info: android_dri: open enter pid=6190 sys=214 path=/etc/ld.so.cache (st=17)
+proot info: vpid 1: translate("/" + "/etc/ld.so.cache")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/etc/ld.so.cache"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libgallium-27.0.0-arch1.92.so (st=39)
+proot info: vpid 1: translate("/" + "/usr/lib/libgallium-27.0.0-arch1.92.so")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libgallium-27.0.0-arch1.92.so"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libLLVM.so.23.1 (st=25)
+proot info: vpid 1: translate("/" + "/usr/lib/libLLVM.so.23.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libLLVM.so.23.1"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libz.so.1 (st=19)
+proot info: vpid 1: translate("/" + "/usr/lib/libz.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libz.so.1.3.2"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libzstd.so.1 (st=22)
+proot info: vpid 1: translate("/" + "/usr/lib/libzstd.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libzstd.so.1.5.7"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libSPIRV-Tools.so (st=27)
+proot info: vpid 1: translate("/" + "/usr/lib/libSPIRV-Tools.so")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libSPIRV-Tools.so"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libsensors.so.5 (st=25)
+proot info: vpid 1: translate("/" + "/usr/lib/libsensors.so.5")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libsensors.so.5.0.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libxcb.so.1 (st=21)
+proot info: vpid 1: translate("/" + "/usr/lib/libxcb.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libxcb.so.1.1.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libxcb-randr.so.0 (st=27)
+proot info: vpid 1: translate("/" + "/usr/lib/libxcb-randr.so.0")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libxcb-randr.so.0.1.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libxcb-sync.so.1 (st=26)
+proot info: vpid 1: translate("/" + "/usr/lib/libxcb-sync.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libxcb-sync.so.1.0.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libxcb-present.so.0 (st=29)
+proot info: vpid 1: translate("/" + "/usr/lib/libxcb-present.so.0")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libxcb-present.so.0.0.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libxshmfence.so.1 (st=27)
+proot info: vpid 1: translate("/" + "/usr/lib/libxshmfence.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libxshmfence.so.1.0.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libxcb-xfixes.so.0 (st=28)
+proot info: vpid 1: translate("/" + "/usr/lib/libxcb-xfixes.so.0")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libxcb-xfixes.so.0.0.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libxcb-dri3.so.0 (st=26)
+proot info: vpid 1: translate("/" + "/usr/lib/libxcb-dri3.so.0")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libxcb-dri3.so.0.1.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libX11-xcb.so.1 (st=25)
+proot info: vpid 1: translate("/" + "/usr/lib/libX11-xcb.so.1")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libX11-xcb.so.1.0.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libedit.so.0 (st=22)
+proot info: vpid 1: translate("/" + "/usr/lib/libedit.so.0")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libedit.so.0.0.78"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libxml2.so.16 (st=23)
+proot info: vpid 1: translate("/" + "/usr/lib/libxml2.so.16")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libxml2.so.16.1.3"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libXau.so.6 (st=21)
+proot info: vpid 1: translate("/" + "/usr/lib/libXau.so.6")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libXau.so.6.0.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libXdmcp.so.6 (st=23)
+proot info: vpid 1: translate("/" + "/usr/lib/libXdmcp.so.6")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libXdmcp.so.6.0.0"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libncursesw.so.6 (st=26)
+proot info: vpid 1: translate("/" + "/usr/lib/libncursesw.so.6")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libncursesw.so.6.6"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libicuuc.so.78 (st=24)
+proot info: vpid 1: translate("/" + "/usr/lib/libicuuc.so.78")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libicuuc.so.78.3"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/lib/libicudata.so.78 (st=26)
+proot info: vpid 1: translate("/" + "/usr/lib/libicudata.so.78")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/lib/libicudata.so.78.3"
+proot info: vpid 1: translate("/" + "/proc")
+proot info: vpid 1:          -> "/proc"
+proot info: vpid 1: translate("/" + "/proc/self")
+proot info: vpid 1:          -> "/proc/self"
+proot info: vpid 1: translate("/" + "/proc/6190")
+proot info: vpid 1:          -> "/proc/6190"
+proot info: vpid 1: translate("/" + "/proc/6190/exe")
+proot info: vpid 1:          -> "/proc/6190/exe"
+proot info: vpid 1: translate("/" + "/tmp")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/fakefs/tmp"
+proot info: vpid 1: translate("/" + "/tmp/aqprobe")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/fakefs/tmp/aqprobe"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/share/drirc.d (st=19)
+proot info: vpid 1: translate("/" + "/usr/share/drirc.d")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/share/drirc.d"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/share/drirc.d/00-mesa-defaults.conf (st=41)
+proot info: vpid 1: translate("/" + "/usr/share/drirc.d/00-mesa-defaults.conf")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/share/drirc.d/00-mesa-defaults.conf"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/share/drirc.d/00-msm-defaults.conf (st=40)
+proot info: vpid 1: translate("/" + "/usr/share/drirc.d/00-msm-defaults.conf")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/share/drirc.d/00-msm-defaults.conf"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/share/drirc.d/00-turnip-defaults.conf (st=43)
+proot info: vpid 1: translate("/" + "/usr/share/drirc.d/00-turnip-defaults.conf")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/share/drirc.d/00-turnip-defaults.conf"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/share/drirc.d/00-virtio_gpu-defaults.conf (st=47)
+proot info: vpid 1: translate("/" + "/usr/share/drirc.d/00-virtio_gpu-defaults.conf")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/share/drirc.d/00-virtio_gpu-defaults.conf"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/share/drirc.d/00-zink-defaults.conf (st=41)
+proot info: vpid 1: translate("/" + "/usr/share/drirc.d/00-zink-defaults.conf")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/share/drirc.d/00-zink-defaults.conf"
+proot info: android_dri: open enter pid=6190 sys=214 path=/etc/drirc (st=11)
+proot info: vpid 1: translate("/" + "/etc/drirc")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/etc/drirc"
+proot info: android_dri: open enter pid=6190 sys=214 path=/root/.drirc (st=13)
+proot info: vpid 1: translate("/" + "/root/.drirc")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/root/.drirc"
+proot info: android_dri: open enter pid=6190 sys=214 path=/sys/devices/system/cpu/possible (st=33)
+proot info: vpid 1: translate("/" + "/sys/devices/system/cpu/possible")
+proot info: vpid 1:          -> "/sys/devices/system/cpu/possible"
+proot info: android_dri: open enter pid=6190 sys=214 path=/sys/devices/system/cpu/cpu0/cpu_capacity (st=42)
+proot info: vpid 1: translate("/" + "/sys/devices/system/cpu/cpu0/cpu_capacity")
+proot info: vpid 1:          -> "/sys/devices/system/cpu/cpu0/cpu_capacity"
+proot info: android_dri: open enter pid=6190 sys=214 path=/sys/devices/system/cpu/cpu1/cpu_capacity (st=42)
+proot info: vpid 1: translate("/" + "/sys/devices/system/cpu/cpu1/cpu_capacity")
+proot info: vpid 1:          -> "/sys/devices/system/cpu/cpu1/cpu_capacity"
+proot info: android_dri: open enter pid=6190 sys=214 path=/sys/devices/system/cpu/cpu2/cpu_capacity (st=42)
+proot info: vpid 1: translate("/" + "/sys/devices/system/cpu/cpu2/cpu_capacity")
+proot info: vpid 1:          -> "/sys/devices/system/cpu/cpu2/cpu_capacity"
+proot info: android_dri: open enter pid=6190 sys=214 path=/sys/devices/system/cpu/cpu3/cpu_capacity (st=42)
+proot info: vpid 1: translate("/" + "/sys/devices/system/cpu/cpu3/cpu_capacity")
+proot info: vpid 1:          -> "/sys/devices/system/cpu/cpu3/cpu_capacity"
+proot info: android_dri: open enter pid=6190 sys=214 path=/sys/devices/system/cpu/cpu4/cpu_capacity (st=42)
+proot info: vpid 1: translate("/" + "/sys/devices/system/cpu/cpu4/cpu_capacity")
+proot info: vpid 1:          -> "/sys/devices/system/cpu/cpu4/cpu_capacity"
+proot info: android_dri: open enter pid=6190 sys=214 path=/sys/devices/system/cpu/cpu5/cpu_capacity (st=42)
+proot info: vpid 1: translate("/" + "/sys/devices/system/cpu/cpu5/cpu_capacity")
+proot info: vpid 1:          -> "/sys/devices/system/cpu/cpu5/cpu_capacity"
+proot info: android_dri: open enter pid=6190 sys=214 path=/sys/devices/system/cpu/cpu6/cpu_capacity (st=42)
+proot info: vpid 1: translate("/" + "/sys/devices/system/cpu/cpu6/cpu_capacity")
+proot info: vpid 1:          -> "/sys/devices/system/cpu/cpu6/cpu_capacity"
+proot info: android_dri: open enter pid=6190 sys=214 path=/sys/devices/system/cpu/cpu7/cpu_capacity (st=42)
+proot info: vpid 1: translate("/" + "/sys/devices/system/cpu/cpu7/cpu_capacity")
+proot info: vpid 1:          -> "/sys/devices/system/cpu/cpu7/cpu_capacity"
+proot info: android_dri: open enter pid=6190 sys=214 path=/dev/udmabuf (st=13)
+proot info: vpid 1: translate("/" + "/dev/udmabuf")
+proot info: vpid 1:          -> "/dev/udmabuf"
+proot info: android_dri: promoted duplicated fd 9 to virtual DRM (pid 6190)
+proot info: android_dri: ioctl on virtual DRM fd 9
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/share/drirc.d (st=19)
+proot info: vpid 1: translate("/" + "/usr/share/drirc.d")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/share/drirc.d"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/share/drirc.d/00-mesa-defaults.conf (st=41)
+proot info: vpid 1: translate("/" + "/usr/share/drirc.d/00-mesa-defaults.conf")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/share/drirc.d/00-mesa-defaults.conf"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/share/drirc.d/00-msm-defaults.conf (st=40)
+proot info: vpid 1: translate("/" + "/usr/share/drirc.d/00-msm-defaults.conf")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/share/drirc.d/00-msm-defaults.conf"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/share/drirc.d/00-turnip-defaults.conf (st=43)
+proot info: vpid 1: translate("/" + "/usr/share/drirc.d/00-turnip-defaults.conf")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/share/drirc.d/00-turnip-defaults.conf"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/share/drirc.d/00-virtio_gpu-defaults.conf (st=47)
+proot info: vpid 1: translate("/" + "/usr/share/drirc.d/00-virtio_gpu-defaults.conf")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/share/drirc.d/00-virtio_gpu-defaults.conf"
+proot info: android_dri: open enter pid=6190 sys=214 path=/usr/share/drirc.d/00-zink-defaults.conf (st=41)
+proot info: vpid 1: translate("/" + "/usr/share/drirc.d/00-zink-defaults.conf")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/usr/share/drirc.d/00-zink-defaults.conf"
+proot info: android_dri: open enter pid=6190 sys=214 path=/etc/drirc (st=11)
+proot info: vpid 1: translate("/" + "/etc/drirc")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/etc/drirc"
+proot info: android_dri: open enter pid=6190 sys=214 path=/root/.drirc (st=13)
+proot info: vpid 1: translate("/" + "/root/.drirc")
+proot info: vpid 1:          -> "/data/user/0/com.alw.workstation/files/rootfs/archlinux-default/root/.drirc"
+proot info: vpid 1: translate("/" + "/proc/self/fd/8")
+proot info: vpid 1:          -> "/proc/6190/fd/8"
+[AQ 1] Created a GBM allocator with drm fd 8
+CBackend::start() = 1
+AQ_PROBE_DONE
+proot info: vpid 1: exited with status 0

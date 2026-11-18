@@ -11,8 +11,11 @@ This PRoot extension makes the node usable:
   `O_RDONLY|O_CLOEXEC` on the open.
 - `statx` / `newfstatat` / `fstat` report `S_IFCHR | 0666`, `st_rdev = makedev(226,128)`.
 - DRM ioctls on tracked fds are emulated: `VERSION` (`vgem`), `GET_CAP`
-  (`DUMB_BUFFER=1`, `PRIME=import|export`), `MODE_CREATE_DUMB`, `MODE_MAP_DUMB`,
-  `MODE_DESTROY_DUMB`, `GEM_CLOSE`; `PRIME_HANDLE_TO_FD` chains a real
+  (`DUMB_BUFFER=1`, `PRIME=import|export`, `TIMESTAMP_MONOTONIC=1`,
+  `ADDFB2_MODIFIERS=1`), `MODE_CREATE_DUMB`, `MODE_MAP_DUMB`,
+  `MODE_DESTROY_DUMB`, `GEM_CLOSE`, plus the minimal KMS surface
+  (`MODE_GETRESOURCES`/`GETCRTC`/`SETCRTC`/`ADDFB`/`ADDFB2`/`RMFB`,
+  `SET_MASTER`/`DROP_MASTER`); `PRIME_HANDLE_TO_FD` chains a real
   `DMA_HEAP_IOCTL_ALLOC` **in the tracee** so the dma-buf fd lands in the
   tracee's fd table. Unknown ioctls pass through untouched.
 
@@ -62,7 +65,13 @@ included in the patch. `lib_loader.so` (vendored) is reused unchanged via
 ## Guest expectations
 
 - `libalw_drm.so` (`/etc/ld.so.preload`) interposes `drmGetRenderDeviceNameFromFd`,
-  `drmGetDeviceNameFromFd2`, `drmIsMaster` and `drmGetDeviceFromDevId` so libdrm
-  resolves the sandboxed node (see `ArchProvisioningScriptBuilder`).
+  `drmGetDeviceNameFromFd2`, `drmIsMaster`, `drmGetDevice2` and
+  `drmGetDeviceFromDevId` so libdrm resolves the sandboxed node (see
+  `ArchProvisioningScriptBuilder`). The synthetic `drmDevice` carries zeroed
+  PCI businfo/deviceinfo so libdrm's `drmDevicesEqual()` is safe.
+- The compositor process must run with `MESA_LOADER_DRIVER_OVERRIDE=kms_swrast`
+  and **no** `GALLIUM_DRIVER` or `LIBGL_ALWAYS_SOFTWARE=1`: both make
+  `eglInitialize()` fail (`EGL_NOT_INITIALIZED`) on the virtual `vgem` node
+  (verified with an EGL/GBM probe).
 - `gbm_create_device()` and `gbm_bo_get_fd()` (PRIME export) are verified working
   on the virtual node with Mesa 27 (llvmpipe/swrast).

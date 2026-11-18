@@ -131,6 +131,21 @@ object EnvironmentGenerator {
         // 8. User and profile environment overrides
         env.putAll(profile.gpu.environmentOverrides)
 
+        // 9. Compositor GBM driver split (TASK-024).
+        // The compositor initializes EGL/GBM on the virtual "vgem" DRM node created by
+        // PRoot. Zink requires a real MSM/kgsl DRM backend there, so the compositor
+        // process must use Mesa's software kms_swrast path; child graphical applications
+        // still receive Turnip/Zink through the compositor's own config (hyprland.conf).
+        if (profile.compositor.type == StackProfile.CompositorType.HYPRLAND) {
+            env["MESA_LOADER_DRIVER_OVERRIDE"] = "kms_swrast"
+            // Empirically verified on-device: explicitly selecting a gallium driver
+            // (GALLIUM_DRIVER=*) or LIBGL_ALWAYS_SOFTWARE=1 alongside the kms_swrast
+            // loader override makes eglInitialize() fail with EGL_NOT_INITIALIZED on the
+            // virtual vgem node. Leaving both unset makes EGL-on-GBM initialize cleanly.
+            env.remove("GALLIUM_DRIVER")
+            env["LIBGL_ALWAYS_SOFTWARE"] = "0"
+        }
+
         return env
     }
 }

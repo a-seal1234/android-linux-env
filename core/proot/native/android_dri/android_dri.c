@@ -84,6 +84,69 @@ struct drm_gem_close {
 	uint32_t pad;
 };
 
+/* Minimal KMS surface used by Mesa's kms_swrast screen creation. */
+struct drm_mode_card_res {
+	uint64_t fb_id_ptr;
+	uint64_t crtc_id_ptr;
+	uint64_t connector_id_ptr;
+	uint64_t encoder_id_ptr;
+	uint32_t count_fbs;
+	uint32_t count_crtcs;
+	uint32_t count_connectors;
+	uint32_t count_encoders;
+	uint32_t min_width;
+	uint32_t max_width;
+	uint32_t min_height;
+	uint32_t max_height;
+};
+
+struct drm_mode_crtc {
+	uint64_t set_connectors_ptr;
+	uint32_t count_connectors;
+	uint32_t crtc_id;
+	uint32_t fb_id;
+	uint32_t x;
+	uint32_t y;
+	uint32_t gamma_size;
+	uint32_t mode_valid;
+	uint32_t mode_clock;
+	uint16_t mode_hdisplay;
+	uint16_t mode_hsync_start;
+	uint16_t mode_hsync_end;
+	uint16_t mode_htotal;
+	uint16_t mode_hskew;
+	uint16_t mode_vdisplay;
+	uint16_t mode_vsync_start;
+	uint16_t mode_vsync_end;
+	uint16_t mode_vtotal;
+	uint16_t mode_vscan;
+	uint32_t mode_flags;
+	uint32_t mode_type;
+	uint32_t mode_name[8];
+};
+
+struct drm_mode_fb_cmd2 {
+	uint32_t fb_id;
+	uint32_t width;
+	uint32_t height;
+	uint32_t pixel_format;
+	uint32_t flags;
+	uint32_t handles[4];
+	uint32_t pitches[4];
+	uint32_t offsets[4];
+	uint64_t modifier[4];
+};
+
+struct drm_mode_fb_cmd {
+	uint32_t fb_id;
+	uint32_t width;
+	uint32_t height;
+	uint32_t pitch;
+	uint32_t bpp;
+	uint32_t depth;
+	uint32_t handle;
+};
+
 #define DRM_IOCTL_BASE 'd'
 #define DRM_IOCTL_VERSION            _IOWR(DRM_IOCTL_BASE, 0x00, struct drm_version)
 #define DRM_IOCTL_GET_CAP            _IOWR(DRM_IOCTL_BASE, 0x0c, struct drm_get_cap)
@@ -94,6 +157,14 @@ struct drm_gem_close {
 #define DRM_IOCTL_MODE_DESTROY_DUMB  _IOWR(DRM_IOCTL_BASE, 0xb4, struct drm_mode_destroy_dumb)
 #define DRM_IOCTL_PRIME_HANDLE_TO_FD _IOWR(DRM_IOCTL_BASE, 0x2d, struct drm_prime_handle)
 #define DRM_IOCTL_PRIME_FD_TO_HANDLE _IOWR(DRM_IOCTL_BASE, 0x2e, struct drm_prime_handle)
+#define DRM_IOCTL_MODE_GETRESOURCES  _IOWR(DRM_IOCTL_BASE, 0xA0, struct drm_mode_card_res)
+#define DRM_IOCTL_MODE_GETCRTC       _IOWR(DRM_IOCTL_BASE, 0xA1, struct drm_mode_crtc)
+#define DRM_IOCTL_MODE_SETCRTC       _IOWR(DRM_IOCTL_BASE, 0xA2, struct drm_mode_crtc)
+#define DRM_IOCTL_MODE_ADDFB         _IOWR(DRM_IOCTL_BASE, 0xAE, struct drm_mode_fb_cmd)
+#define DRM_IOCTL_MODE_ADDFB2        _IOWR(DRM_IOCTL_BASE, 0xB8, struct drm_mode_fb_cmd2)
+#define DRM_IOCTL_MODE_RMFB          _IOWR(DRM_IOCTL_BASE, 0xAF, uint32_t)
+#define DRM_IOCTL_SET_MASTER         0x641e
+#define DRM_IOCTL_DROP_MASTER        0x641f
 
 /* Android DMA-BUF heap allocation (kernel uapi) */
 struct dma_heap_allocation_data {
@@ -118,8 +189,10 @@ struct drm_set_client_cap {
 	uint64_t value;
 };
 
-#define DRM_CAP_DUMB_BUFFER 0x1
-#define DRM_CAP_PRIME       0x5
+#define DRM_CAP_DUMB_BUFFER        0x1
+#define DRM_CAP_PRIME              0x5
+#define DRM_CAP_TIMESTAMP_MONOTONIC 0x6
+#define DRM_CAP_ADDFB2_MODIFIERS   0x10
 
 /* --- Per-tracee virtual DRM fd tracking --- */
 
@@ -338,6 +411,10 @@ static void emulate_ioctl(Tracee *tracee, int fd, unsigned long request, word_t 
 				cap.value = 1;
 			else if (cap.capability == DRM_CAP_PRIME)
 				cap.value = 1 | 2; /* DRM_PRIME_CAP_IMPORT | DRM_PRIME_CAP_EXPORT */
+			else if (cap.capability == DRM_CAP_TIMESTAMP_MONOTONIC)
+				cap.value = 1;
+			else if (cap.capability == DRM_CAP_ADDFB2_MODIFIERS)
+				cap.value = 1;
 			else
 				cap.value = 0;
 			write_data(tracee, arg, &cap, sizeof(*&cap));
@@ -425,6 +502,54 @@ static void emulate_ioctl(Tracee *tracee, int fd, unsigned long request, word_t 
 		}
 		poke_reg(tracee, SYSARG_RESULT, (word_t) -EINVAL);
 		return;
+	} else if (request == DRM_IOCTL_MODE_GETRESOURCES) {
+		struct drm_mode_card_res res;
+		if (arg != 0 && read_data(tracee, &res, arg, sizeof(res)) >= 0) {
+			/* One virtual CRTC, no connectors/encoders/fbs. */
+			if (res.count_crtcs == 0 && res.count_connectors == 0
+			    && res.count_encoders == 0 && res.count_fbs == 0) {
+				res.count_crtcs = 1;
+			}
+			res.min_width = res.min_width ? res.min_width : 1;
+			res.max_width = res.max_width ? res.max_width : 16384;
+			res.min_height = res.min_height ? res.min_height : 1;
+			res.max_height = res.max_height ? res.max_height : 16384;
+			write_data(tracee, arg, &res, sizeof(res));
+			VERBOSE(tracee, 2, "android_dri: GETRESOURCES crtcs=%u", res.count_crtcs);
+			result = 0;
+		}
+	} else if (request == DRM_IOCTL_MODE_GETCRTC) {
+		struct drm_mode_crtc crtc;
+		if (arg != 0 && read_data(tracee, &crtc, arg, sizeof(crtc)) >= 0) {
+			crtc.crtc_id = crtc.crtc_id ? crtc.crtc_id : 1;
+			crtc.fb_id = 0;
+			crtc.gamma_size = 0;
+			crtc.mode_valid = 0;
+			write_data(tracee, arg, &crtc, sizeof(crtc));
+			result = 0;
+		}
+	} else if (request == DRM_IOCTL_MODE_SETCRTC) {
+		result = 0;
+	} else if (request == DRM_IOCTL_MODE_ADDFB || request == DRM_IOCTL_MODE_ADDFB2) {
+		if (request == DRM_IOCTL_MODE_ADDFB) {
+			struct drm_mode_fb_cmd fb;
+			if (arg != 0 && read_data(tracee, &fb, arg, sizeof(fb)) >= 0) {
+				fb.fb_id = 1;
+				write_data(tracee, arg, &fb, sizeof(fb));
+				result = 0;
+			}
+		} else {
+			struct drm_mode_fb_cmd2 fb2;
+			if (arg != 0 && read_data(tracee, &fb2, arg, sizeof(fb2)) >= 0) {
+				fb2.fb_id = 1;
+				write_data(tracee, arg, &fb2, sizeof(fb2));
+				result = 0;
+			}
+		}
+	} else if (request == DRM_IOCTL_MODE_RMFB) {
+		result = 0;
+	} else if (request == DRM_IOCTL_SET_MASTER || request == DRM_IOCTL_DROP_MASTER) {
+		result = 0;
 	} else {
 		/* Unknown request (e.g. a genuine DMA_HEAP_IOCTL_ALLOC on the bound heap
 		 * node): leave the kernel's result untouched. */
