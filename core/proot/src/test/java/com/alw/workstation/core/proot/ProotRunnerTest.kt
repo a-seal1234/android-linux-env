@@ -73,7 +73,7 @@ class ProotRunnerTest {
         assertTrue(cmd.arguments.contains("--"))
         assertTrue(cmd.arguments.contains("start-hyprland"))
         assertTrue(cmd.arguments.contains("-c"))
-        assertTrue(cmd.arguments.contains("/tmp/android-session.conf"))
+        assertTrue(cmd.arguments.contains("/tmp/android-session.lua"))
     }
 
     @Test

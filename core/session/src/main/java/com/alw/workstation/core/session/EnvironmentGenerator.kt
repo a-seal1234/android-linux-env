@@ -27,7 +27,7 @@ object EnvironmentGenerator {
         env["GLIBC_TUNABLES"] = "glibc.pthread.rseq=0"
 
         // 2. Wayland runtime environment & nested compositor backend
-        env["XDG_RUNTIME_DIR"] = "/tmp/runtime-alw"
+        env["XDG_RUNTIME_DIR"] = "/tmp/rt"
         env["WAYLAND_DISPLAY"] = "wayland-0"
         env["XDG_SESSION_TYPE"] = "wayland"
         env["AQ_BACKEND"] = "wayland"
@@ -107,7 +107,7 @@ object EnvironmentGenerator {
 
         // 6. Low-Latency Audio Subsystem (PulseAudio & PipeWire)
         env["PULSE_SERVER"] = "unix:/run/user/1000/pulse/native"
-        env["PIPEWIRE_RUNTIME_DIR"] = "/tmp/runtime-alw"
+        env["PIPEWIRE_RUNTIME_DIR"] = "/tmp/rt"
 
         // 7. x86_64 Emulation & GPU Thunking environment (FEX-Emu / box64)
         if (profile.emulation.enabled) {

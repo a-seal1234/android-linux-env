@@ -84,6 +84,7 @@ class WaylandServerManager {
     private external fun nativeSetSurface(surface: Surface?)
     private external fun nativeResizeSurface(width: Int, height: Int)
     private external fun nativeSetRefreshRate(hz: Float)
+    private external fun nativeOnVsync(frameTimeNanos: Long)
     private external fun nativeIsRunning(): Boolean
     private external fun nativeGetActiveClients(): Int
     private external fun nativeIsTabletV2Supported(): Boolean
@@ -183,6 +184,16 @@ class WaylandServerManager {
         mockRefreshRateHz = if (hz > 0f) hz else 60f
         if (isNativeLoaded) {
             nativeSetRefreshRate(mockRefreshRateHz)
+        }
+    }
+
+    /**
+     * Forwards a host VSync from the Android Choreographer; the native bridge flushes
+     * queued wl_callback.done events on its event-loop thread.
+     */
+    fun notifyVsync(frameTimeNanos: Long) {
+        if (isNativeLoaded) {
+            nativeOnVsync(frameTimeNanos)
         }
     }
 

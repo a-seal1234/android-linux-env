@@ -16,7 +16,7 @@ class EnvironmentGeneratorTest {
         val env = EnvironmentGenerator.generateEnvironment(profile, runtimeDir)
 
         assertEquals("wayland-0", env["WAYLAND_DISPLAY"])
-        assertEquals("/tmp/runtime-alw", env["XDG_RUNTIME_DIR"])
+        assertEquals("/tmp/rt", env["XDG_RUNTIME_DIR"])
         assertEquals("Hyprland", env["XDG_CURRENT_DESKTOP"])
         assertEquals("wayland", env["AQ_BACKEND"])
         assertEquals("wayland", env["WLR_BACKENDS"])
@@ -48,7 +48,7 @@ class EnvironmentGeneratorTest {
 
         // Audio bridge variables
         assertEquals("unix:/run/user/1000/pulse/native", env["PULSE_SERVER"])
-        assertEquals("/tmp/runtime-alw", env["PIPEWIRE_RUNTIME_DIR"])
+        assertEquals("/tmp/rt", env["PIPEWIRE_RUNTIME_DIR"])
     }
 
     @Test

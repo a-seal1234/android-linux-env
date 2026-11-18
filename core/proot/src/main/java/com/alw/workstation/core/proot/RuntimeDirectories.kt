@@ -32,7 +32,7 @@ data class RuntimeDirectories(
     fun getOverlayDir(engine: String, version: String): File = File(File(overlaysBaseDir, engine.lowercase()), version)
     fun getActiveOverlayDir(engine: String): File = File(File(overlaysBaseDir, engine.lowercase()), "active")
     fun getRuntimeSocketDir(sessionId: String): File {
-        val runtimeAlwDir = File(File(fakefsBaseDir, "tmp"), "runtime-alw")
+        val runtimeAlwDir = File(File(fakefsBaseDir, "tmp"), "rt")
         if (!runtimeAlwDir.exists()) {
             runtimeAlwDir.mkdirs()
         }

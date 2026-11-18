@@ -15,64 +15,57 @@ class ConfigSynthesizerTest {
     val tempFolder = TemporaryFolder()
 
     @Test
-    fun testSynthesizeHyprlandConfigHardwareAcceleration() {
+    fun testSynthesizeHyprlandSessionConfigHardwareAcceleration() {
         val profile = StackProfile.defaultArchXiaomiPad8()
-        val config = ConfigSynthesizer.synthesizeHyprlandConfig(profile)
+        val config = ConfigSynthesizer.synthesizeHyprlandSessionConfig(profile)
 
-        // 1. Non-destructive sourcing
-        assertTrue(config.contains("source = /home/alw/.config/hypr/hyprland.conf"))
+        // Hyprland >= 0.57 Lua dialect (the INI dialect is silently ignored)
+        assertTrue(config.contains("hl.config({"))
+        assertTrue(config.contains("xwayland = { enabled = false }"))
+        assertTrue(config.contains("debug = { enable_stdout_logs = true }"))
+        assertTrue(config.contains("cursor = { no_hardware_cursors = 1 }"))
+        assertTrue(config.contains("disable_hyprland_logo = true"))
 
-        // 2. Display & HiDPI scaling
-        assertTrue(config.contains("monitor = WL-1, 3200x2136@144, 0x0, 1.75"))
-        assertTrue(config.contains("force_zero_scaling = true"))
+        // Display scale and nested backend environment
+        assertTrue(config.contains("hl.monitor({ output = \"\", mode = \"preferred\", position = \"auto\", scale = \"1.75\" })"))
+        assertTrue(config.contains("hl.env(\"AQ_BACKEND\", \"wayland\")"))
+        assertTrue(config.contains("hl.env(\"WLR_BACKENDS\", \"wayland\")"))
+        assertTrue(config.contains("hl.env(\"LIBSEAT_BACKEND\", \"noop\")"))
+        assertTrue(config.contains("hl.env(\"WLR_NO_HARDWARE_CURSORS\", \"1\")"))
 
-        // 3. Tablet and touch inputs for creative pen workflows
-        assertTrue(config.contains("tablet {"))
-        assertTrue(config.contains("touchdevice {"))
-        assertTrue(config.contains("output = WL-1"))
+        // Autostart and keybindings use the Lua dispatcher API
+        assertTrue(config.contains("hl.on(\"hyprland.start\", function()"))
+        assertTrue(config.contains("hl.exec_cmd(\"konsole --hold -e /bin/bash -c 'fastfetch; exec bash'\")"))
+        assertTrue(config.contains("hl.bind(\"SUPER + Return\", hl.dsp.exec_cmd(\"kitty\"))"))
+        assertTrue(config.contains("hl.bind(\"SUPER + M\", hl.dsp.exit())"))
 
-        // 4. Workstation standard keybindings
-        assertTrue(config.contains("\$mainMod = SUPER"))
-        assertTrue(config.contains("bind = \$mainMod, Return, exec, kitty"))
-        assertTrue(config.contains("bind = \$mainMod, Q, killactive,"))
-        assertTrue(config.contains("bind = \$mainMod, M, exit,"))
+        // Hardware accelerated visuals (Turnip Adreno 825)
+        assertTrue(config.contains("rounding = 8"))
+        assertTrue(config.contains("blur = { enabled = true, size = 5, passes = 2 }"))
 
-        // 5. Hardware accelerated visuals (Turnip Adreno 825)
-        assertTrue(config.contains("enabled = true"))
-        assertTrue(config.contains("drop_shadow = true"))
-
-        // 6. Nested Wayland backend environment
-        assertTrue(config.contains("env = AQ_BACKEND,wayland"))
-        assertTrue(config.contains("env = WLR_BACKENDS,wayland"))
-
-        // 7. PRoot / Android Wayland bridge mitigations
-        assertTrue(config.contains("enabled = false")) // xwayland disabled
-        assertTrue(config.contains("no_hardware_cursors = true"))
-        assertTrue(config.contains("monitor = , 3200x2136@60, 0x0, 1.75"))
-        assertTrue(config.contains("windowrulev2 = float, class:.*"))
-        assertTrue(config.contains("env = LIBSEAT_BACKEND,noop"))
-        assertTrue(config.contains("env = WLR_NO_HARDWARE_CURSORS,1"))
-        // The compositor must stay on the kms_swrast loader override: no explicit
-        // gallium driver is exported in the session config.
-        assertFalse(config.contains("env = GALLIUM_DRIVER,zink"))
-        assertTrue(config.contains("exec-once = konsole --hold -e /bin/bash -c \"fastfetch; glxinfo -B; exec bash\" &"))
+        // No legacy INI directives may leak into the Lua session config
+        assertFalse(config.contains("exec-once ="))
+        assertFalse(config.contains("monitor = "))
+        assertFalse(config.contains("env = AQ_BACKEND"))
+        // The compositor must stay on the kms_swrast loader override
+        assertFalse(config.contains("GALLIUM_DRIVER"))
     }
 
     @Test
-    fun testSynthesizeHyprlandConfigSoftwareFallbackVisualDegradation() {
-        val profile = StackProfile.defaultArchXiaomiPad8().copy(
-            gpu = StackProfile.defaultArchXiaomiPad8().gpu.copy(
+    fun testSynthesizeHyprlandSessionConfigSoftwareFallback() {
+        val base = StackProfile.defaultArchXiaomiPad8()
+        val profile = base.copy(
+            gpu = base.gpu.copy(
                 driverMode = StackProfile.DriverMode.LLVMPIPE,
                 mesaLoaderOverride = "llvmpipe"
             )
         )
-        val config = ConfigSynthesizer.synthesizeHyprlandConfig(profile)
+        val config = ConfigSynthesizer.synthesizeHyprlandSessionConfig(profile)
 
-        // Verifies blur and drop shadows are disabled under software fallback (llvmpipe)
-        assertTrue(config.contains("Software fallback visual degradation (llvmpipe)"))
+        // Software fallback disables expensive decorations
         assertTrue(config.contains("rounding = 0"))
-        assertTrue(config.contains("blur {\n        enabled = false"))
-        assertTrue(config.contains("drop_shadow = false"))
+        assertTrue(config.contains("blur = { enabled = false }"))
+        assertFalse(config.contains("size = 5"))
     }
 
     @Test

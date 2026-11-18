@@ -60,11 +60,11 @@ class ArchProvisioningScriptBuilderTest {
 
         // Step 7: Low-latency PulseAudio / PipeWire audio bridge
         assertTrue(script.contains("/etc/pulse/client.conf"))
-        assertTrue(script.contains("default-server = unix:/tmp/runtime-alw/pulse/native"))
+        assertTrue(script.contains("default-server = unix:/tmp/rt/pulse/native"))
         assertTrue(script.contains("enable-shm = false"))
-        assertTrue(script.contains("ln -sfn /tmp/runtime-alw/pulse /run/user/1000/pulse"))
-        assertTrue(script.contains("PULSE_SERVER=unix:/run/user/1000/pulse/native unix:/tmp/runtime-alw/pulse/native"))
-        assertTrue(script.contains("PIPEWIRE_RUNTIME_DIR=/tmp/runtime-alw"))
+        assertTrue(script.contains("ln -sfn /tmp/rt/pulse /run/user/1000/pulse"))
+        assertTrue(script.contains("PULSE_SERVER=unix:/run/user/1000/pulse/native unix:/tmp/rt/pulse/native"))
+        assertTrue(script.contains("PIPEWIRE_RUNTIME_DIR=/tmp/rt"))
 
         // Step 8: Android PTY & Pacman root access compatibility shim
         assertTrue(script.contains("==> Step 8/8: Materializing Android PTY & Pacman access shim..."))

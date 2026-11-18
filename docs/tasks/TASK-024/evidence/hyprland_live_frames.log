@@ -1,0 +1,6 @@
+11-18 23:47:44.299 I/ALW::WaylandBridgeNative(11300): wl_surface 13: commit (buffer=18, frameCallbacks=1, xdg=1)
+11-18 23:47:44.332 I/ALW::WaylandBridgeNative(11300): Flushing 1 frame callback(s) on event loop
+11-18 23:47:44.332 I/ALW::WaylandBridgeNative(11300): Frame callback 68 -> fd 4 (ts=835774667)
+11-18 23:47:47.697 I/ALW::WaylandBridgeNative(11300): wl_surface 13: commit (buffer=22, frameCallbacks=1, xdg=1)
+11-18 23:47:47.738 I/ALW::WaylandBridgeNative(11300): Flushing 1 frame callback(s) on event loop
+11-18 23:47:47.738 I/ALW::WaylandBridgeNative(11300): Frame callback 69 -> fd 4 (ts=835778072)

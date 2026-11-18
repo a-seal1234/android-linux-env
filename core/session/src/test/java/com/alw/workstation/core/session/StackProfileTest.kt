@@ -39,16 +39,15 @@ class StackProfileTest {
     @Test
     fun testConfigSynthesizerNonDestructiveWrapper() {
         val profile = StackProfile.defaultArchXiaomiPad8()
-        val config = ConfigSynthesizer.synthesizeHyprlandConfig(profile)
+        val config = ConfigSynthesizer.synthesizeHyprlandSessionConfig(profile)
 
-        // Verifies step 1 sources user config first (non-destructive invariant)
-        assertTrue(config.contains("source = /home/alw/.config/hypr/hyprland.conf"))
-
-        // Verifies step 2 appends overrides
-        assertTrue(config.contains("monitor = WL-1, 3200x2136@144, 0x0, 1.75"))
-        assertTrue(config.contains("kb_options = caps:super"))
-        assertTrue(config.contains("env = WAYLAND_DISPLAY,wayland-0"))
-        assertTrue(config.contains("env = ELECTRON_OZONE_PLATFORM_HINT,wayland"))
+        // Verifies the Lua session override is additive: the user config path is
+        // referenced (never rewritten) and overrides are separate directives.
+        assertTrue(config.contains("User configuration stays untouched at /home/alw/.config/hypr/hyprland.conf"))
+        assertTrue(config.contains("hl.config({"))
+        assertTrue(config.contains("hl.monitor({"))
+        assertTrue(config.contains("hl.env(\"WAYLAND_DISPLAY\", \"wayland-0\")"))
+        assertTrue(config.contains("hl.env(\"ELECTRON_OZONE_PLATFORM_HINT\", \"wayland\")"))
     }
 
     @Test

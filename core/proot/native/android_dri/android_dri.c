@@ -208,6 +208,7 @@ typedef struct {
 	pid_t pid;
 	int fd;            /* owning virtual DRM fd */
 	int bo_fd;         /* real dma_heap buffer in the tracee's fd table (-1 = none) */
+	bool owns_fd;      /* bo_fd was allocated by us and must be closed on destroy */
 	uint32_t handle;
 	uint32_t width;
 	uint32_t height;
@@ -366,6 +367,7 @@ static DriBoEntry *add_bo(pid_t pid, int fd, uint32_t handle,
 	bo->pid = pid;
 	bo->fd = fd;
 	bo->bo_fd = -1;
+	bo->owns_fd = false;
 	bo->handle = handle;
 	bo->width = width;
 	bo->height = height;
@@ -533,7 +535,7 @@ static void emulate_ioctl(Tracee *tracee, int fd, unsigned long request, word_t 
 		if (arg != 0 && read_data(tracee, &destroy, arg, sizeof(*&destroy)) >= 0) {
 			DriBoEntry *bo = find_bo(tracee->pid, fd, destroy.handle);
 			if (bo != NULL) {
-				if (bo->bo_fd > 0) {
+				if (bo->bo_fd > 0 && bo->owns_fd) {
 					register_chained_syscall(tracee, PR_close, (word_t) bo->bo_fd, 0, 0, 0, 0, 0);
 					force_chain_final_result(tracee, 0);
 					bo->bo_fd = -1;
@@ -547,7 +549,7 @@ static void emulate_ioctl(Tracee *tracee, int fd, unsigned long request, word_t 
 		if (arg != 0 && read_data(tracee, &close_arg, arg, sizeof(*&close_arg)) >= 0) {
 			DriBoEntry *bo = find_bo(tracee->pid, fd, close_arg.handle);
 			if (bo != NULL) {
-				if (bo->bo_fd > 0) {
+				if (bo->bo_fd > 0 && bo->owns_fd) {
 					register_chained_syscall(tracee, PR_close, (word_t) bo->bo_fd, 0, 0, 0, 0, 0);
 					force_chain_final_result(tracee, 0);
 					bo->bo_fd = -1;
@@ -613,6 +615,32 @@ static void emulate_ioctl(Tracee *tracee, int fd, unsigned long request, word_t 
 		}
 		poke_reg(tracee, SYSARG_RESULT, (word_t) -EINVAL);
 		return;
+	} else if (request == DRM_IOCTL_PRIME_FD_TO_HANDLE) {
+		/* Mesa/GBM import path: turn a dma-buf fd back into a (synthetic) GEM handle.
+		 * Without this the real heap node answers ENOTTY and callers retry forever. */
+		struct drm_prime_handle prime;
+		if (arg != 0 && read_data(tracee, &prime, arg, sizeof(prime)) >= 0) {
+			int32_t importFd = prime.fd;
+			uint64_t size = 0;
+			char fdPath[64];
+			struct stat st;
+
+			snprintf(fdPath, sizeof(fdPath), "/proc/%d/fd/%d", (int) tracee->pid, importFd);
+			if (importFd > 0 && stat(fdPath, &st) == 0)
+				size = (uint64_t) st.st_size;
+
+			uint32_t handle = s_nextHandle++;
+			DriBoEntry *bo = add_bo(tracee->pid, fd, handle, 0, 0, 32, size);
+			if (bo != NULL) {
+				bo->bo_fd = importFd;
+				bo->owns_fd = false; /* the caller owns the imported fd */
+			}
+			prime.handle = handle;
+			write_data(tracee, arg, &prime, sizeof(prime));
+			VERBOSE(tracee, 2, "android_dri: imported fd %d as handle %u (size %llu)",
+				importFd, handle, (unsigned long long) size);
+			result = 0;
+		}
 	} else if (request == DRM_IOCTL_MODE_GETRESOURCES) {
 		struct drm_mode_card_res res;
 		if (arg != 0 && read_data(tracee, &res, arg, sizeof(res)) >= 0) {
@@ -821,6 +849,7 @@ int android_dri_callback(Extension *extension, ExtensionEvent event,
 				if (read_data(tracee, &alloc, pending->scratch, sizeof(alloc)) >= 0
 				    && (int32_t) alloc.fd > 0 && bo != NULL) {
 					bo->bo_fd = (int32_t) alloc.fd;
+					bo->owns_fd = true;
 					VERBOSE(tracee, 2, "android_dri: dumb handle %u backed by heap fd %d",
 						pending->handle, bo->bo_fd);
 				}

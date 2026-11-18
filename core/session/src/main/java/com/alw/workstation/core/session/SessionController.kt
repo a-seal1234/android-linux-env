@@ -34,7 +34,7 @@ class SessionController(
 
     /**
      * Prepares session artifacts non-destructively.
-     * Returns the synthesized session config string (e.g. for /tmp/android-session.conf).
+     * Returns the synthesized session config string (e.g. /tmp/android-session.lua).
      */
     fun prepareSession(profile: StackProfile): Result<String> {
         val validation = ProfileValidator.validate(profile)
@@ -47,7 +47,7 @@ class SessionController(
         updateState(SessionState.Starting(profile.id))
 
         val configContent = if (profile.compositor.type == StackProfile.CompositorType.HYPRLAND) {
-            ConfigSynthesizer.synthesizeHyprlandConfig(profile)
+            ConfigSynthesizer.synthesizeHyprlandSessionConfig(profile)
         } else {
             "# Non-Hyprland session: ${profile.compositor.type}\n"
         }

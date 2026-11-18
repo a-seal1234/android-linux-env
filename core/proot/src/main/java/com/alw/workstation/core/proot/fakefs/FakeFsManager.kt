@@ -87,7 +87,7 @@ class FakeFsManager(
         }
 
         // Subdirectories required inside tmp
-        val runtimeAlwDir = File(tmpDir, "runtime-alw")
+        val runtimeAlwDir = File(tmpDir, "rt")
 
         // Virtual DRI directory: listable /dev/dri with a renderD128 placeholder entry
         // (the real node is SELinux-denied; ProotRunner binds the DMA-BUF heap over the
@@ -112,7 +112,7 @@ class FakeFsManager(
             try {
                 java.nio.file.Files.createSymbolicLink(
                     runUser1000Pulse.toPath(),
-                    java.nio.file.Paths.get("/tmp/runtime-alw/pulse")
+                    java.nio.file.Paths.get("/tmp/rt/pulse")
                 )
             } catch (_: Throwable) {}
         }
@@ -121,7 +121,7 @@ class FakeFsManager(
             try {
                 java.nio.file.Files.createSymbolicLink(
                     runUser1000W0.toPath(),
-                    java.nio.file.Paths.get("/tmp/runtime-alw/wayland-0")
+                    java.nio.file.Paths.get("/tmp/rt/wayland-0")
                 )
             } catch (_: Throwable) {}
         }
@@ -130,7 +130,7 @@ class FakeFsManager(
             try {
                 java.nio.file.Files.createSymbolicLink(
                     runUser1000W1.toPath(),
-                    java.nio.file.Paths.get("/tmp/runtime-alw/wayland-1")
+                    java.nio.file.Paths.get("/tmp/rt/wayland-1")
                 )
             } catch (_: Throwable) {}
         }

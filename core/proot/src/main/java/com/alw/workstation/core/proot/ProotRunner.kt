@@ -87,12 +87,17 @@ class ProotRunner(
 
         // Materialize the synthesized session override config inside the bind-mounted /tmp.
         // The rootfs copy written by CompositorOrchestrator is shadowed by the fakefs /tmp
-        // bind mount, so the compositor would otherwise never see /tmp/android-session.conf.
+        // bind mount, so the compositor would otherwise never see the session config.
+        // Hyprland >= 0.57 only understands its Lua dialect, so that profile uses
+        // /tmp/android-session.lua regardless of what a persisted profile recorded.
+        val isHyprlandSession = profile.compositor.type == StackProfile.CompositorType.HYPRLAND
+        val sessionConfigPath = if (isHyprlandSession) "/tmp/android-session.lua"
+                                else profile.compositor.sessionConfigPath
         if (profile.compositor.configMode == StackProfile.ConfigMode.WRAP_AND_OVERRIDE) {
-            val sessionConfigName = File(profile.compositor.sessionConfigPath).name
-            val sessionConfigFile = File(fakeFsManager.tmpDir, sessionConfigName)
+            val sessionConfigFile = File(fakeFsManager.tmpDir, File(sessionConfigPath).name)
             sessionConfigFile.writeText(
-                ConfigSynthesizer.synthesizeHyprlandConfig(profile)
+                if (isHyprlandSession) ConfigSynthesizer.synthesizeHyprlandSessionConfig(profile)
+                else "# Session override for ${profile.compositor.type}\n"
             )
         }
 
@@ -143,7 +148,7 @@ class ProotRunner(
         }
         if (!isInsideFakefsTmp) {
             args.add("-b")
-            args.add("${sessionRuntimeDir.absolutePath}:/tmp/runtime-alw")
+            args.add("${sessionRuntimeDir.absolutePath}:/tmp/rt")
 
             // Also bind-mount to /run/user/1000 for standard Linux client compatibility
             val guestRunUser1000 = File(rootfsDir, "run/user/1000")
@@ -260,6 +265,13 @@ class ProotRunner(
             else -> profile.compositor.execCommand
         }
         val execArgs = (customArgs ?: profile.compositor.extraArgs).toMutableList()
+        if (isHyprlandSession && customExecCommand == null) {
+            val configFlag = execArgs.indexOf("-c")
+            if (configFlag >= 0 && configFlag + 1 < execArgs.size)
+                execArgs[configFlag + 1] = sessionConfigPath
+            else
+                execArgs.addAll(0, listOf("-c", sessionConfigPath))
+        }
 
         if ((execCmd == "Hyprland" || execCmd == "start-hyprland" ||
                 profile.compositor.type == StackProfile.CompositorType.HYPRLAND) &&

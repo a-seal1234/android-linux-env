@@ -31,7 +31,7 @@ data class StackProfile(
         val execCommand: String,
         val configMode: ConfigMode = ConfigMode.WRAP_AND_OVERRIDE,
         val userConfigPath: String? = null,
-        val sessionConfigPath: String = "/tmp/android-session.conf",
+        val sessionConfigPath: String = "/tmp/android-session.lua",
         val extraArgs: List<String> = emptyList()
     )
 
@@ -252,7 +252,7 @@ data class StackProfile(
                         ConfigMode.DIRECT
                     },
                     userConfigPath = compObj.optString("userConfigPath").takeIf { it.isNotBlank() },
-                    sessionConfigPath = compObj.optString("sessionConfigPath", "/tmp/android-session.conf"),
+                    sessionConfigPath = compObj.optString("sessionConfigPath", "/tmp/android-session.lua"),
                     extraArgs = extraArgsList
                 ),
                 gpu = GpuConfig(
@@ -317,8 +317,8 @@ data class StackProfile(
                     execCommand = "start-hyprland",
                     configMode = ConfigMode.WRAP_AND_OVERRIDE,
                     userConfigPath = "/home/alw/.config/hypr/hyprland.conf",
-                    sessionConfigPath = "/tmp/android-session.conf",
-                    extraArgs = listOf("-c", "/tmp/android-session.conf", "--i-am-really-stupid")
+                    sessionConfigPath = "/tmp/android-session.lua",
+                    extraArgs = listOf("-c", "/tmp/android-session.lua", "--i-am-really-stupid")
                 ),
                 gpu = GpuConfig(
                     driverMode = DriverMode.TURNIP_KGSL,

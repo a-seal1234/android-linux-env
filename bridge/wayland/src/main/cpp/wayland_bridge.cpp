@@ -1,6 +1,5 @@
 #include <jni.h>
 #include <android/log.h>
-#include <android/choreographer.h>
 #include <android/looper.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
@@ -469,6 +468,13 @@ public:
             return false;
         }
 
+        if (pipe2(m_flushSignalPipe, O_NONBLOCK | O_CLOEXEC) == 0) {
+            m_flushSignalRead = m_flushSignalPipe[0];
+            m_flushSignalWrite = m_flushSignalPipe[1];
+        } else {
+            LOGE("Frame pacing: flush signal pipe failed: %s", strerror(errno));
+        }
+
         m_running.store(true);
         m_serverThread = std::thread(&WaylandSurfaceServer::eventLoop, this);
         m_pacingThread = std::thread(&WaylandSurfaceServer::pacingLoop, this);
@@ -493,6 +499,14 @@ public:
         if (m_pacingWakeWrite >= 0) {
             close(m_pacingWakeWrite);
             m_pacingWakeWrite = -1;
+        }
+        if (m_flushSignalRead >= 0) {
+            close(m_flushSignalRead);
+            m_flushSignalRead = -1;
+        }
+        if (m_flushSignalWrite >= 0) {
+            close(m_flushSignalWrite);
+            m_flushSignalWrite = -1;
         }
         if (m_serverFd >= 0) {
             shutdown(m_serverFd, SHUT_RDWR);
@@ -569,6 +583,9 @@ public:
     }
 
     float getRefreshRate() const { return m_refreshRateHz.load(); }
+
+    // Called from JNI on the Android main thread for every host VSync.
+    void notifyVsync(int64_t frameTimeNanos) { onVsync(frameTimeNanos); }
 
     bool isRunning() const { return m_running.load(); }
     int getActiveClientsCount() const { return m_activeClients.load(); }
@@ -935,7 +952,7 @@ private:
     // wl_callback.done must be paced to the host display. Replying synchronously
     // inside wl_surface.commit makes nested compositors (Aquamarine/Hyprland)
     // re-arm their timerfd in a 0 ms busy loop; instead the callbacks are queued
-    // and flushed from AChoreographer's hardware VSync callback (60-144 Hz,
+    // and flushed from the Android Choreographer VSync callback (60-144 Hz,
     // whatever HyperOS is currently running) with a refresh-rate timer fallback.
     static constexpr int PACING_WAKE_IDENT = 0x414c57;
 
@@ -961,27 +978,28 @@ private:
         return !m_pendingFrameCallbacks.empty();
     }
 
-    static void choreographerFrameCallback(int64_t frameTimeNanos, void* data) {
-        static_cast<WaylandSurfaceServer*>(data)->onVsync(frameTimeNanos);
-    }
-
+    // Invoked from the Android main thread Choreographer (valid JNIEnv) via JNI.
+    // The NDK AChoreographer callback cannot be used here: it dispatches into the
+    // Java event loop and crashes from a non-attached native thread.
     void onVsync(int64_t frameTimeNanos) {
-        m_choreographerFramePosted = false;
+        m_lastVsyncNs.store(frameTimeNanos);
         static std::atomic<int> s_vsyncTicks{0};
         int tick = s_vsyncTicks.fetch_add(1);
-        if (tick < 5 || tick % 120 == 0)
+        if (tick < 5 || tick % 300 == 0)
             LOGI("VSync tick #%d (frameTime=%lld ns)", tick, (long long) frameTimeNanos);
-        flushFrameCallbacks(frameTimeNanos);
-        if (hasPendingFrameCallbacks())
-            postChoreographerFrame();
+
+        // All Wayland protocol writes must stay on the event-loop thread: signal it
+        // instead of sending wl_callback.done from another thread.
+        signalEventLoop();
     }
 
-    void postChoreographerFrame() {
-        if (m_choreographer == nullptr || m_choreographerFramePosted)
+    void signalEventLoop() {
+        int fd = m_flushSignalWrite;
+        if (fd < 0)
             return;
-        m_choreographerFramePosted = true;
-        AChoreographer_postFrameCallback64(m_choreographer,
-            &WaylandSurfaceServer::choreographerFrameCallback, this);
+        char byte = 1;
+        ssize_t ignored = write(fd, &byte, 1);
+        (void) ignored;
     }
 
     void flushFrameCallbacks(int64_t frameTimeNanos) {
@@ -992,11 +1010,11 @@ private:
         }
         if (pending.empty())
             return;
-        LOGI("Flushing %zu frame callback(s) at VSync", pending.size());
 
         uint32_t timestampMs = frameTimeNanos > 0
             ? static_cast<uint32_t>(frameTimeNanos / 1000000LL)
             : nowMillis();
+        LOGI("Flushing %zu frame callback(s) on event loop", pending.size());
 
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         for (const auto& cb : pending) {
@@ -1025,10 +1043,7 @@ private:
             ALooper_addFd(looper, m_pacingWakeRead, PACING_WAKE_IDENT,
                           ALOOPER_EVENT_INPUT, nullptr, nullptr);
 
-        m_choreographer = AChoreographer_getInstance();
-        LOGI("Frame pacing thread started (AChoreographer %s, %.1f Hz fallback)",
-             m_choreographer != nullptr ? "available" : "unavailable",
-             m_refreshRateHz.load());
+        LOGI("Frame pacing fallback thread started (%.1f Hz base rate)", m_refreshRateHz.load());
 
         while (m_running.load()) {
             float hz = m_refreshRateHz.load();
@@ -1050,11 +1065,10 @@ private:
             if (!hasPendingFrameCallbacks())
                 continue;
 
-            if (m_choreographer != nullptr)
-                postChoreographerFrame();
-
+            // Dead-man fallback: if the host Choreographer pauses (screen off, no
+            // frames requested), still flush at the live refresh cadence.
             if (ident == ALOOPER_POLL_TIMEOUT)
-                flushFrameCallbacks(0); // timer fallback paced at the live refresh rate
+                signalEventLoop();
         }
     }
 
@@ -2240,6 +2254,9 @@ private:
                 pollFds.push_back({m_serverFd, POLLIN, 0});
             }
 
+            // Slot 1: frame-pacing signal (VSync tick / timer fallback).
+            pollFds.push_back({m_flushSignalRead, POLLIN, 0});
+
             {
                 std::lock_guard<std::recursive_mutex> lock(m_mutex);
                 for (const auto& pair : m_clients) {
@@ -2274,9 +2291,15 @@ private:
                 }
             }
 
+            if (pollFds.size() > 1 && (pollFds[1].revents & POLLIN)) {
+                char drain[128];
+                while (read(m_flushSignalRead, drain, sizeof(drain)) > 0) { }
+                flushFrameCallbacks(m_lastVsyncNs.load());
+            }
+
             // Check client data
             std::vector<int> deadFds;
-            for (size_t i = 1; i < pollFds.size(); ++i) {
+            for (size_t i = 2; i < pollFds.size(); ++i) {
                 const auto& pfd = pollFds[i];
                 if (pfd.revents & (POLLHUP | POLLERR)) {
                     deadFds.push_back(pfd.fd);
@@ -2348,14 +2371,16 @@ private:
     std::thread m_serverThread;
     std::recursive_mutex m_mutex;
 
+    int m_flushSignalPipe[2] = {-1, -1};
     std::atomic<float> m_refreshRateHz{60.0f};
     std::thread m_pacingThread;
     int m_pacingWakeRead{-1};
     int m_pacingWakeWrite{-1};
     std::mutex m_pacingMutex;
     std::vector<std::pair<int, uint32_t>> m_pendingFrameCallbacks;
-    AChoreographer* m_choreographer{nullptr};
-    bool m_choreographerFramePosted{false};
+    int m_flushSignalRead{-1};
+    int m_flushSignalWrite{-1};
+    std::atomic<int64_t> m_lastVsyncNs{0};
 
     ANativeWindow* m_nativeWindow;
     int m_width;
@@ -2426,6 +2451,17 @@ Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSetSurface(
     } else {
         getServer()->setNativeWindow(nullptr);
     }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeOnVsync(
+    JNIEnv* env,
+    jobject thiz,
+    jlong frameTimeNanos
+) {
+    (void) env;
+    (void) thiz;
+    getServer()->notifyVsync(static_cast<int64_t>(frameTimeNanos));
 }
 
 extern "C" JNIEXPORT void JNICALL

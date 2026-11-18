@@ -13,7 +13,7 @@ object RiceShimGenerator {
 # KDE Plasma Session Starter for Nested KWin Wayland
 echo "Starting plasma session at ${'$'}(date)"
 export PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:${'$'}PATH
-export XDG_RUNTIME_DIR="${'$'}{XDG_RUNTIME_DIR:-/tmp/runtime-alw}"
+export XDG_RUNTIME_DIR="${'$'}{XDG_RUNTIME_DIR:-/tmp/rt}"
 export WAYLAND_DISPLAY=wayland-1
 export XDG_CURRENT_DESKTOP=KDE
 export DESKTOP_SESSION=plasma
@@ -40,7 +40,7 @@ wait
 # PRoot Compatibility Shim for startplasma-wayland
 echo "=== startplasma-wayland started at ${'$'}(date) ==="
 export PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:${'$'}PATH
-export XDG_RUNTIME_DIR="${'$'}{XDG_RUNTIME_DIR:-/tmp/runtime-alw}"
+export XDG_RUNTIME_DIR="${'$'}{XDG_RUNTIME_DIR:-/tmp/rt}"
 mkdir -p "${'$'}XDG_RUNTIME_DIR"
 chmod 0700 "${'$'}XDG_RUNTIME_DIR" 2>/dev/null || true
 HOST_WAYLAND="${'$'}{WAYLAND_DISPLAY:-wayland-0}"
