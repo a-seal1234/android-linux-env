@@ -5,6 +5,7 @@ import android.hardware.display.DisplayManager
 import android.os.Build
 import android.util.AttributeSet
 import android.view.InputDevice
+import android.view.Choreographer
 import android.view.Display
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -46,6 +47,38 @@ class WaylandSurfaceView @JvmOverloads constructor(
 
     private val displayManager: DisplayManager?
         get() = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+
+    /**
+     * Drives the bridge's frame pacing from the host VSync.
+     *
+     * Without this the native pacer has no presentation clock and falls back to its
+     * 250 ms dead-man timer, which caps the whole session at ~4 FPS regardless of
+     * rendering work. Re-armed on every frame, on the main thread (the native side
+     * must be called with a valid JNIEnv, so an NDK AChoreographer callback is not
+     * usable here).
+     */
+    private val choreographer by lazy { Choreographer.getInstance() }
+    @Volatile private var vsyncRunning = false
+
+    private val vsyncCallback = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (!vsyncRunning) return
+            serverManager?.onVsync(frameTimeNanos)
+            choreographer.postFrameCallback(this)
+        }
+    }
+
+    private fun startVsyncPacing() {
+        if (vsyncRunning) return
+        vsyncRunning = true
+        choreographer.postFrameCallback(vsyncCallback)
+    }
+
+    private fun stopVsyncPacing() {
+        if (!vsyncRunning) return
+        vsyncRunning = false
+        choreographer.removeFrameCallback(vsyncCallback)
+    }
 
     var inputProfile: InputProfile = InputProfile.CREATIVE_PEN
         set(value) {
@@ -112,6 +145,7 @@ class WaylandSurfaceView @JvmOverloads constructor(
     override fun surfaceCreated(holder: SurfaceHolder) {
         display?.let { pushRefreshRate(it, applySurfaceFrameRate = true) }
         serverManager?.attachSurface(holder.surface)
+        startVsyncPacing()
         if (hasWindowFocus()) {
             applyInputProfile(inputProfile)
         }
@@ -124,6 +158,7 @@ class WaylandSurfaceView @JvmOverloads constructor(
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
+        stopVsyncPacing()
         serverManager?.detachSurface()
     }
 

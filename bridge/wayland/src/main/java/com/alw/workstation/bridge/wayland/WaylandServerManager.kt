@@ -86,6 +86,7 @@ class WaylandServerManager {
     private external fun nativeSetRefreshRate(hz: Float)
     private external fun nativeSetRenderScale(scale: Float)
     private external fun nativeGetRenderScale(): Float
+    private external fun nativeOnVsync(frameTimeNanos: Long)
     private external fun nativeGetActualFps(): Float
     private external fun nativeIsRunning(): Boolean
     private external fun nativeGetActiveClients(): Int
@@ -123,6 +124,8 @@ class WaylandServerManager {
     private var mockScale = 1.75f
     private var mockRefreshRateHz = 60f
     private var mockSurfaceAttached = false
+    var mockVsyncTicks = 0
+        private set
 
     val mockTablet = MockTabletState()
     val mockPointer = MockPointerState()
@@ -210,6 +213,19 @@ class WaylandServerManager {
         if (!isNativeLoaded) return
         actualFps = nativeGetActualFps()
         renderScale = nativeGetRenderScale()
+    }
+
+    /**
+     * Forwards a host VSync tick so the native bridge can flush wl_callback.done at the
+     * real presentation cadence. Without these ticks the pacer falls back to a 250 ms
+     * timer, capping the session at ~4 FPS.
+     */
+    fun onVsync(frameTimeNanos: Long) {
+        if (isNativeLoaded) {
+            nativeOnVsync(frameTimeNanos)
+        } else {
+            mockVsyncTicks++
+        }
     }
 
     fun setRefreshRate(hz: Float) {

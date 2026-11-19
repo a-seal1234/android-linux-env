@@ -1,0 +1,29 @@
+=== GPU Blocker Gate measurement — 2026-11-19T16:18:46Z ===
+device: Xiaomi Pad 8, Adreno 825, wireless adb 192.168.51.161:44021
+app pid=17740
+
+--- VSync driver (the Phase-1 fix) ---
+11-19 23:17:27.379 17740 17740 I ALW::WaylandBridgeNative: VSync tick #85500 (frameTime=916388882991203 ns)
+11-19 23:17:32.377 17740 17740 I ALW::WaylandBridgeNative: VSync tick #85800 (frameTime=916393883008112 ns)
+11-19 23:17:37.378 17740 17740 I ALW::WaylandBridgeNative: VSync tick #86100 (frameTime=916398883025013 ns)
+
+--- host blit stage cost (upload vs draw+swap) ---
+11-19 23:18:32.253 17740 18000 I ALW::WaylandBridgeNative: GLES stage: upload=0.84ms draw+swap=0.89ms total=1.77ms (1600x1068)
+11-19 23:18:34.459 17740 18000 I ALW::WaylandBridgeNative: GLES stage: upload=1.00ms draw+swap=1.16ms total=2.20ms (1600x1068)
+11-19 23:18:37.100 17740 18000 I ALW::WaylandBridgeNative: GLES stage: upload=0.79ms draw+swap=1.00ms total=1.83ms (1600x1068)
+11-19 23:18:39.199 17740 18000 I ALW::WaylandBridgeNative: GLES stage: upload=1.05ms draw+swap=1.00ms total=2.09ms (1600x1068)
+11-19 23:18:41.888 17740 18000 I ALW::WaylandBridgeNative: GLES stage: upload=1.13ms draw+swap=2.14ms total=3.32ms (1600x1068)
+11-19 23:18:44.175 17740 18000 I ALW::WaylandBridgeNative: GLES stage: upload=0.95ms draw+swap=1.08ms total=2.08ms (1600x1068)
+11-19 23:18:46.806 17740 18000 I ALW::WaylandBridgeNative: GLES stage: upload=0.72ms draw+swap=0.60ms total=1.36ms (1600x1068)
+11-19 23:18:49.038 17740 18000 I ALW::WaylandBridgeNative: GLES stage: upload=0.87ms draw+swap=1.45ms total=2.35ms (1600x1068)
+
+--- compositor renderer ---
+MESA_LOADER_DRIVER_OVERRIDE=zink
+GALLIUM_DRIVER=zink
+ALW_COMPOSITOR_ZINK=1
+
+--- zero-copy probe ---
+11-19 23:18:32.254 17740 18000 I ALW::WaylandBridgeNative: dmabuf: mmap fallback blit active (1600x1068 stride=6400 fmt=0x34325258) map=0.14ms blit=1.93ms total=2.06ms
+11-19 23:18:37.100 17740 18000 I ALW::WaylandBridgeNative: dmabuf: mmap fallback blit active (1600x1068 stride=6400 fmt=0x34325258) map=0.17ms blit=1.92ms total=2.09ms
+11-19 23:18:41.888 17740 18000 I ALW::WaylandBridgeNative: dmabuf: mmap fallback blit active (1600x1068 stride=6400 fmt=0x34325258) map=0.14ms blit=3.38ms total=3.52ms
+11-19 23:18:46.806 17740 18000 I ALW::WaylandBridgeNative: dmabuf: mmap fallback blit active (1600x1068 stride=6400 fmt=0x34325258) map=0.08ms blit=1.42ms total=1.50ms

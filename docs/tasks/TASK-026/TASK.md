@@ -233,3 +233,29 @@ Full record: [blocker-gate-2026-11-19.md](evidence/blocker-gate-2026-11-19.md).
 - **Gate verdict: not met / not measured.** HyperOS refused every APK install (silent 25 s
   `INSTALL_CANCELED_BY_USER`, no confirmation UI, `persist.security.adbinstall=1`), so neither
   the spike nor the FPS measurement ran. **TASK-027 and TASK-028 stay Blocked.**
+
+## 8. VSync pacing fix and re-measurement (2026-11-19 23:18)
+
+Full record: [vsync-fix-gate-2026-11-19.md](evidence/vsync-fix-gate-2026-11-19.md).
+
+**Root cause of the 1–2 FPS baseline:** `onVsync()` in `wayland_bridge.cpp` had **no JNI
+binding and no Kotlin caller**. The pacer therefore had no presentation clock and fell back to
+its 250 ms dead-man timer — which is why 0.75× and 0.40× scale both measured ~3.8 FPS
+(scale-independent ⇒ timer-bound, not pixel-bound).
+
+**Fix:** `nativeOnVsync` JNI export (with `onVsync` moved to the public section) plus a
+`Choreographer.FrameCallback` loop in `WaylandSurfaceView`, re-armed every frame and stopped in
+`surfaceDestroyed`. VSync ticks now arrive every 16.7 ms.
+
+| Metric | Before | After |
+|---|---|---|
+| Sustained window movement, 1.0× | ~3.8 FPS | **26.4–26.8 FPS** |
+| Sustained window movement, 0.5× | ~3.8 FPS | **28.7 FPS** (peak) |
+| Hyprland CPU (zink) | 341 % (kms_swrast) | **19–34 %** |
+| Host blit, 1600×1068 | (CPU-only) | upload **0.72–1.13 ms**, draw+swap **0.60–2.14 ms** |
+
+**Gate still NOT passed** (28.7 < 30), so TASK-027/028 remain Blocked. Remaining limit is
+serialised latency, not throughput: zero-copy is still absent (this Adreno does not advertise
+`EGL_EXT_image_dma_buf_import`, AHB import is rejected, padded stride 9728), PRoot syscall
+translation costs 34–72 % CPU, and 250–440 ms hitch frames drag the average. GPU
+utilisation/clock is unreadable without root (`/sys/class/kgsl/...` → `Permission denied`).

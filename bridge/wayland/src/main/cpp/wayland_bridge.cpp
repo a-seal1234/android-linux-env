@@ -817,6 +817,7 @@ public:
 
     // Uploads the guest frame as a texture and draws a fullscreen quad on Adreno.
     bool presentWithGl(const uint8_t* src, int width, int height, int stride, uint32_t format) {
+        const auto tStart = std::chrono::steady_clock::now();
         if (!ensureGlPresenter()) return false;
         if (!eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext))
             return false;
@@ -849,8 +850,12 @@ public:
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
         // Both ARGB8888 and XRGB8888 guest buffers are B,G,R,A byte order in memory;
         // GL_RGBA keeps the upload on a core format and the fragment shader swizzles.
+        const auto tUploadStart = std::chrono::steady_clock::now();
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA,
                         GL_UNSIGNED_BYTE, src);
+        // Force the upload to complete so the timing is real, not just queued.
+        glFinish();
+        const auto tUploadEnd = std::chrono::steady_clock::now();
 
         EGLint surfaceWidth = 0, surfaceHeight = 0;
         eglQuerySurface(m_eglDisplay, m_eglSurface, EGL_WIDTH, &surfaceWidth);
@@ -909,7 +914,20 @@ public:
         }
 
         const EGLBoolean swapped = eglSwapBuffers(m_eglDisplay, m_eglSurface);
+        const auto tSwapEnd = std::chrono::steady_clock::now();
         m_glVideo[0] = swapped == EGL_TRUE;
+
+        // Per-stage timing (TASK-026 gate): upload vs draw vs swap tells us which
+        // stage actually costs the frame budget instead of guessing.
+        static int s_stageLog = 0;
+        if (++s_stageLog % 30 == 1) {
+            auto ms = [](auto a, auto b) {
+                return std::chrono::duration<double, std::milli>(b - a).count();
+            };
+            LOGI("GLES stage: upload=%.2fms draw+swap=%.2fms total=%.2fms (%dx%d)",
+                 ms(tUploadStart, tUploadEnd), ms(tUploadEnd, tSwapEnd),
+                 ms(tStart, tSwapEnd), width, height);
+        }
         if (swapped != EGL_TRUE) {
             static int s_swapFailLog = 0;
             if (++s_swapFailLog <= 5) {
@@ -1877,6 +1895,21 @@ public:
         }
     }
 
+    // Invoked from the Android main thread Choreographer (valid JNIEnv) via JNI.
+    // The NDK AChoreographer callback cannot be used here: it dispatches into the
+    // Java event loop and crashes from a non-attached native thread.
+    void onVsync(int64_t frameTimeNanos) {
+        m_lastVsyncNs.store(frameTimeNanos);
+        static std::atomic<int> s_vsyncTicks{0};
+        int tick = s_vsyncTicks.fetch_add(1);
+        if (tick < 5 || tick % 300 == 0)
+            LOGI("VSync tick #%d (frameTime=%lld ns)", tick, (long long) frameTimeNanos);
+
+        // All Wayland protocol writes must stay on the event-loop thread: signal it
+        // instead of sending wl_callback.done from another thread.
+        signalEventLoop();
+    }
+
 private:
     // --- VSync frame pacing -------------------------------------------------
     // wl_callback.done must be paced to the host display. Replying synchronously
@@ -1906,21 +1939,6 @@ private:
     bool hasPendingFrameCallbacks() {
         std::lock_guard<std::mutex> lock(m_pacingMutex);
         return !m_pendingFrameCallbacks.empty();
-    }
-
-    // Invoked from the Android main thread Choreographer (valid JNIEnv) via JNI.
-    // The NDK AChoreographer callback cannot be used here: it dispatches into the
-    // Java event loop and crashes from a non-attached native thread.
-    void onVsync(int64_t frameTimeNanos) {
-        m_lastVsyncNs.store(frameTimeNanos);
-        static std::atomic<int> s_vsyncTicks{0};
-        int tick = s_vsyncTicks.fetch_add(1);
-        if (tick < 5 || tick % 300 == 0)
-            LOGI("VSync tick #%d (frameTime=%lld ns)", tick, (long long) frameTimeNanos);
-
-        // All Wayland protocol writes must stay on the event-loop thread: signal it
-        // instead of sending wl_callback.done from another thread.
-        signalEventLoop();
     }
 
     void signalEventLoop() {
@@ -2367,6 +2385,7 @@ private:
         }
 
         // Fallback: mmap the linear DMA-BUF and upload into the BufferQueue.
+        const auto t0 = std::chrono::steady_clock::now();
         size_t length = static_cast<size_t>(plane.stride) * static_cast<size_t>(buffer->height)
                         + plane.offset;
         if (length == 0) length = static_cast<size_t>(buffer->width) * 4 * buffer->height;
@@ -2376,14 +2395,21 @@ private:
             return false;
         }
         const uint8_t* pixels = static_cast<const uint8_t*>(mapped) + plane.offset;
+        const auto t1 = std::chrono::steady_clock::now();
         blitBufferToWindow(pixels, buffer->width, buffer->height,
                            static_cast<int>(plane.stride), blitFormat);
+        const auto t2 = std::chrono::steady_clock::now();
         munmap(mapped, length);
 
         static int s_mmapLog = 0;
         if (++s_mmapLog % 60 == 1) {
-            LOGI("dmabuf: mmap fallback blit active (%dx%d stride=%u fmt=0x%x)",
-                 buffer->width, buffer->height, plane.stride, buffer->format);
+            auto ms = [](auto a, auto b) {
+                return std::chrono::duration<double, std::milli>(b - a).count();
+            };
+            LOGI("dmabuf: mmap fallback blit active (%dx%d stride=%u fmt=0x%x) "
+                 "map=%.2fms blit=%.2fms total=%.2fms",
+                 buffer->width, buffer->height, plane.stride, buffer->format,
+                 ms(t0, t1), ms(t1, t2), ms(t0, t2));
         }
         return true;
     }
@@ -3534,6 +3560,17 @@ Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeGetRenderScal
     (void) env;
     (void) thiz;
     return getServer()->getRenderScale();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeOnVsync(
+    JNIEnv* env,
+    jobject thiz,
+    jlong frameTimeNanos
+) {
+    (void) env;
+    (void) thiz;
+    getServer()->onVsync(static_cast<int64_t>(frameTimeNanos));
 }
 
 extern "C" JNIEXPORT jfloat JNICALL
