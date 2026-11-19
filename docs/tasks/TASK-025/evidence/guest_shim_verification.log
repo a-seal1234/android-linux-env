@@ -1,7 +1,7 @@
 == fake sysfs ==
-capacity=17
+capacity=38
 status=Charging
-voltage_now=3822000
+voltage_now=3825000
 max_brightness=100
 brightness=50
 == sysfs listing ==

@@ -264,6 +264,22 @@ fi
 exit 0
 """
 
+    const val ALW_GUI_RUN_SHIM = """#!/bin/sh
+# ALW: launch a GUI client against the nested compositor's Wayland socket.
+# Hyprland does not always propagate WAYLAND_DISPLAY to exec_cmd children, and the
+# bridge owns wayland-0 while the compositor takes the next free name; resolve the
+# newest compositor socket explicitly before exec.
+RUNTIME="${'$'}{XDG_RUNTIME_DIR:-/tmp/rt}"
+if [ -z "${'$'}WAYLAND_DISPLAY" ] || [ ! -S "${'$'}RUNTIME/${'$'}WAYLAND_DISPLAY" ]; then
+    SOCK="$(ls -t "${'$'}RUNTIME"/wayland-* 2>/dev/null | grep -v '\\.lock${'$'}' | head -1)"
+    if [ -n "${'$'}SOCK" ]; then
+        WAYLAND_DISPLAY="$(basename "${'$'}SOCK")"
+        export WAYLAND_DISPLAY
+    fi
+fi
+exec "${'$'}@"
+"""
+
     const val ALW_HOST_QUERY_SHIM = """#!/bin/sh
 # ALW host bridge query helper (TASK-025).
 # Usage: alw-host-query "battery" | alw-host-query "volume get" ...
@@ -601,6 +617,7 @@ exec "${'$'}@"
             "sudo" to SUDO_SHIM,
             "xdg-open" to XDG_OPEN_SHIM,
             "alw-host-query" to ALW_HOST_QUERY_SHIM,
+            "alw-gui-run" to ALW_GUI_RUN_SHIM,
             "brightnessctl" to BRIGHTNESSCTL_SHIM,
             "wpctl" to WPCTL_SHIM,
             "pamixer" to PAMIXER_SHIM,

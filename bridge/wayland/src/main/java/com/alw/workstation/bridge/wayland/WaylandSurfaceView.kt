@@ -4,6 +4,7 @@ import android.content.Context
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.util.AttributeSet
+import android.view.InputDevice
 import android.view.Display
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -138,7 +139,19 @@ class WaylandSurfaceView @JvmOverloads constructor(
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
         if (!hasFocus()) requestFocus()
+        // Deliver mouse/hover moves as soon as they arrive instead of batching them to
+        // the next VSync: cuts the pointer-to-photon latency on high-refresh panels.
+        if (event.isPointerMotion()) {
+            requestUnbufferedDispatch(event)
+        }
         return inputDispatcher?.handleMotionEvent(event, width, height) ?: super.onGenericMotionEvent(event)
+    }
+
+    private fun MotionEvent.isPointerMotion(): Boolean {
+        val isMouse = (source and InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE ||
+            (source and InputDevice.SOURCE_STYLUS) == InputDevice.SOURCE_STYLUS
+        if (!isMouse) return false
+        return action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_HOVER_MOVE
     }
 
     override fun onCapturedPointerEvent(event: MotionEvent): Boolean {

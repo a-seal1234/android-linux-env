@@ -1,0 +1,8 @@
+[ThemeService] system hint: matugen is not installed - Install matugen (it is not on the shell's PATH). Nothing below works without it
+JReceived event: "openlayer>>quickshell" parsed as "openlayer" "quickshell"
+PReceived event: "openlayer>>sekaipop-dock" parsed as "openlayer" "sekaipop-dock"
+RReceived event: "closelayer>>sekaipop-dock" parsed as "closelayer" "sekaipop-dock"
+W[ThemeService] system: system-theme: matugen is not installed (not on the shell's PATH)
+---
+W[ThemeService] system: system-theme: matugen is not installed (not on the shell's PATH)
+O[ThemeService] system: matugen is not installed, GTK/Qt/KDE colours not applied

@@ -594,6 +594,157 @@ public:
         return false;
     }
 
+    void resizeWindowShadow(int width, int height, int stride) {
+        if (width == m_shadowWidth && height == m_shadowHeight && stride == m_shadowStride)
+            return;
+        m_shadowWidth = width;
+        m_shadowHeight = height;
+        m_shadowStride = stride;
+        m_windowShadow.assign(static_cast<size_t>(stride) * height * 4, 0);
+        m_cursorDrawnX = -1;
+        m_cursorDrawnY = -1;
+    }
+
+    static inline uint32_t blendPremultiplied(uint32_t src, uint32_t dst) {
+        const uint32_t sa = (src >> 24) & 0xFF;
+        if (sa == 0) return dst;
+        if (sa == 255) return src;
+        const uint32_t ia = 255 - sa;
+        const uint32_t r = (src & 0xFF) + (((dst & 0xFF) * ia) / 255);
+        const uint32_t g = ((src >> 8) & 0xFF) + ((((dst >> 8) & 0xFF) * ia) / 255);
+        const uint32_t b = ((src >> 16) & 0xFF) + ((((dst >> 16) & 0xFF) * ia) / 255);
+        return 0xFF000000u | (b << 16) | (g << 8) | r;
+    }
+
+    // Restores one rectangle of the window buffer from the clean shadow frame.
+    void restoreRectFromShadow(uint8_t* dst, int dstStride, int x, int y, int w, int h) {
+        if (m_windowShadow.empty()) return;
+        const int x0 = std::max(0, x);
+        const int y0 = std::max(0, y);
+        const int x1 = std::min(std::min(m_width, m_shadowWidth), x + w);
+        const int y1 = std::min(std::min(m_height, m_shadowHeight), y + h);
+        for (int row = y0; row < y1; ++row) {
+            std::memcpy(dst + static_cast<size_t>(row) * dstStride * 4 + static_cast<size_t>(x0) * 4,
+                        m_windowShadow.data() + static_cast<size_t>(row) * m_shadowStride * 4 + static_cast<size_t>(x0) * 4,
+                        static_cast<size_t>(x1 - x0) * 4);
+        }
+    }
+
+    void drawCursorOverlay() {
+        if (m_nativeWindow == nullptr || !m_cursorImage.valid() || m_windowShadow.empty())
+            return;
+
+        ANativeWindow_Buffer outBuffer;
+        if (ANativeWindow_lock(m_nativeWindow, &outBuffer, nullptr) != 0)
+            return;
+
+        auto* dst = reinterpret_cast<uint8_t*>(outBuffer.bits);
+        const int stride = outBuffer.stride;
+
+        // Erase the previous sprite from the clean shadow, then paint the new one.
+        if (m_cursorDrawnX >= 0 && m_cursorDrawnY >= 0) {
+            restoreRectFromShadow(dst, stride, m_cursorDrawnX, m_cursorDrawnY,
+                                  m_cursorImage.width, m_cursorImage.height);
+        }
+
+        const int drawX = static_cast<int>(std::lround(m_pointerState.x)) - m_cursorImage.hotX;
+        const int drawY = static_cast<int>(std::lround(m_pointerState.y)) - m_cursorImage.hotY;
+        restoreRectFromShadow(dst, stride, drawX, drawY, m_cursorImage.width, m_cursorImage.height);
+
+        for (int row = 0; row < m_cursorImage.height; ++row) {
+            const int py = drawY + row;
+            if (py < 0 || py >= outBuffer.height) continue;
+            auto* dstRow = reinterpret_cast<uint32_t*>(dst + static_cast<size_t>(py) * stride * 4);
+            const uint32_t* srcRow = m_cursorImage.pixels.data() + static_cast<size_t>(row) * m_cursorImage.width;
+            for (int col = 0; col < m_cursorImage.width; ++col) {
+                const int px = drawX + col;
+                if (px < 0 || px >= outBuffer.width) continue;
+                dstRow[px] = blendPremultiplied(srcRow[col], dstRow[px]);
+            }
+        }
+
+        m_cursorDrawnX = drawX;
+        m_cursorDrawnY = drawY;
+        ANativeWindow_unlockAndPost(m_nativeWindow);
+    }
+
+    void captureCursorImage(const ShmBuffer& buffer) {
+        if (!buffer.storage || buffer.storage->mappedData == nullptr) return;
+        if (buffer.width <= 0 || buffer.height <= 0 || buffer.width > 256 || buffer.height > 256) return;
+
+        const auto* src = reinterpret_cast<const uint32_t*>(buffer.storage->mappedData + buffer.offset);
+        const int srcStridePx = buffer.stride / 4;
+        std::vector<uint32_t> converted(static_cast<size_t>(buffer.width) * buffer.height);
+
+        for (int y = 0; y < buffer.height; ++y) {
+            const uint32_t* srcRow = src + static_cast<size_t>(y) * srcStridePx;
+            uint32_t* dstRow = converted.data() + static_cast<size_t>(y) * buffer.width;
+            for (int x = 0; x < buffer.width; ++x) {
+                const uint32_t p = srcRow[x];
+                // WL_SHM ARGB8888 -> Android RGBA_8888
+                dstRow[x] = ((p & 0x00FF0000u) >> 16) |
+                            (p & 0x0000FF00u) |
+                            ((p & 0x000000FFu) << 16) |
+                            (buffer.format == 1 ? 0xFF000000u : (p & 0xFF000000u));
+            }
+        }
+
+        m_cursorImage.pixels = std::move(converted);
+        m_cursorImage.width = buffer.width;
+        m_cursorImage.height = buffer.height;
+        m_cursorDrawnX = -1;
+        m_cursorDrawnY = -1;
+        LOGI("Cursor image cached: %dx%d (hotspot %d,%d)", buffer.width, buffer.height,
+             m_cursorImage.hotX, m_cursorImage.hotY);
+    }
+
+    // Cursor surfaces may arrive as dma-buf (Hyprland's hardware-cursor path) rather
+    // than wl_shm; mmap the plane and convert it into the overlay sprite.
+    void captureCursorFromDmabuf(const std::shared_ptr<DmabufBuffer>& buffer) {
+        if (!buffer || buffer->planes.empty()) return;
+        const DmabufPlane& plane = buffer->planes[0];
+        if (plane.fd < 0 || buffer->width <= 0 || buffer->height <= 0) return;
+        if (buffer->width > 256 || buffer->height > 256) return;
+
+        const bool argb = buffer->format == DRM_FORMAT_ARGB8888;
+        const bool xrgb = buffer->format == DRM_FORMAT_XRGB8888;
+        if (!argb && !xrgb) {
+            LOGW("cursor dmabuf: unsupported format 0x%x", buffer->format);
+            return;
+        }
+
+        const size_t length = static_cast<size_t>(plane.stride) * buffer->height
+                              + static_cast<size_t>(plane.offset);
+        void* mapped = mmap(nullptr, length, PROT_READ, MAP_SHARED, plane.fd, 0);
+        if (mapped == MAP_FAILED) {
+            LOGW("cursor dmabuf: mmap failed: %s", strerror(errno));
+            return;
+        }
+
+        const auto* base = static_cast<const uint8_t*>(mapped) + plane.offset;
+        std::vector<uint32_t> converted(static_cast<size_t>(buffer->width) * buffer->height);
+        for (int y = 0; y < buffer->height; ++y) {
+            const auto* srcRow = reinterpret_cast<const uint32_t*>(base + static_cast<size_t>(y) * plane.stride);
+            uint32_t* dstRow = converted.data() + static_cast<size_t>(y) * buffer->width;
+            for (int x = 0; x < buffer->width; ++x) {
+                const uint32_t p = srcRow[x];
+                dstRow[x] = ((p & 0x00FF0000u) >> 16) |
+                            (p & 0x0000FF00u) |
+                            ((p & 0x000000FFu) << 16) |
+                            (xrgb ? 0xFF000000u : (p & 0xFF000000u));
+            }
+        }
+        munmap(mapped, length);
+
+        m_cursorImage.pixels = std::move(converted);
+        m_cursorImage.width = buffer->width;
+        m_cursorImage.height = buffer->height;
+        m_cursorDrawnX = -1;
+        m_cursorDrawnY = -1;
+        LOGI("Cursor image cached from dmabuf: %dx%d (hotspot %d,%d)", buffer->width,
+             buffer->height, m_cursorImage.hotX, m_cursorImage.hotY);
+    }
+
     // Direct pixel blit to ANativeWindow buffer with format-aware color channel mapping & aspect scaling
     void blitBufferToWindow(const uint8_t* src, int srcWidth, int srcHeight, int srcStride, uint32_t format = 0) {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
@@ -611,6 +762,7 @@ public:
                  s_frameLogCount, srcWidth, srcHeight, srcStride, format, outBuffer.width, outBuffer.height, outBuffer.stride);
         }
 
+        resizeWindowShadow(outBuffer.width, outBuffer.height, outBuffer.stride);
         auto* dstPixels = reinterpret_cast<uint8_t*>(outBuffer.bits);
         if (srcWidth == outBuffer.width && srcHeight == outBuffer.height) {
             for (int y = 0; y < outBuffer.height; ++y) {
@@ -665,6 +817,16 @@ public:
                     }
                 }
             }
+        }
+
+        // Keep a clean copy for cursor-overlay restores (cursor motion must not
+        // repaint the full 27 MB output buffer).
+        if (!m_windowShadow.empty() &&
+            m_shadowWidth == outBuffer.width && m_shadowHeight == outBuffer.height) {
+            std::memcpy(m_windowShadow.data(), dstPixels,
+                        static_cast<size_t>(m_shadowStride) * m_shadowHeight * 4);
+            m_cursorDrawnX = -1;
+            m_cursorDrawnY = -1;
         }
 
         ANativeWindow_unlockAndPost(m_nativeWindow);
@@ -765,6 +927,10 @@ public:
                 sendPacket(client.fd, frame);
             }
         }
+
+        // Overlay the cached cursor sprite immediately: pointer motion no longer
+        // waits for the compositor to re-blit the whole output.
+        drawCursorOverlay();
     }
 
     void sendPointerAbsolute(float x, float y) {
@@ -1048,8 +1214,12 @@ private:
             int frameIntervalMs = std::max(1, static_cast<int>(1000.0f / hz));
 
             int timeoutMs = 250;
-            if (hasPendingFrameCallbacks())
-                timeoutMs = frameIntervalMs * 2; // dead-man switch if VSync callbacks pause
+            if (hasPendingFrameCallbacks()) {
+                // 1x cadence: the previous 2x dead-man delay doubled pointer-to-photon
+                // latency when the host VSync callbacks paused. ClaimNow (below) still
+                // guarantees progress if only a timer tick arrives.
+                timeoutMs = std::max(1, static_cast<int>(1000.0f / (hz > 1.0f ? hz : 60.0f)));
+            }
 
             int ident = ALooper_pollOnce(timeoutMs, nullptr, nullptr, nullptr);
             if (ident == PACING_WAKE_IDENT) {
@@ -1769,9 +1939,10 @@ private:
                 LOGI("wl_surface %u: frame callback %u registered", surface.surfaceId, callbackId);
             } else if (opcode == 6) {
                 // wl_surface.commit() -> Blit the active window buffer!
-                LOGI("wl_surface %u: commit (buffer=%u, frameCallbacks=%zu, xdg=%d)",
+                LOGI("wl_surface %u: commit (buffer=%u, frameCallbacks=%zu, xdg=%d, cursor=%d)",
                      surface.surfaceId, surface.attachedBufferId,
-                     surface.frameCallbacks.size(), surface.isXdgSurface ? 1 : 0);
+                     surface.frameCallbacks.size(), surface.isXdgSurface ? 1 : 0,
+                     surface.isCursor ? 1 : 0);
                 sendSurfaceEnterIfNeeded(client, surface);
                 if (surface.attachedBufferId > 0) {
                     auto dbIt = client.dmabufBuffers.find(surface.attachedBufferId);
@@ -1781,6 +1952,9 @@ private:
                                              || (!surface.isCursor && dbuf->width >= 320 && dbuf->height >= 240);
                         if (isMainSurface) {
                             importAndRenderDmabuf(dbuf);
+                        } else if (surface.isCursor) {
+                            captureCursorFromDmabuf(dbuf);
+                            drawCursorOverlay();
                         }
                         // wl_buffer.release: the imported fd set is retained; the client may reuse
                         WaylandMessageWriter releaseMsg(surface.attachedBufferId, 0);
@@ -1797,6 +1971,10 @@ private:
                         if (isMainSurface && buf.storage && buf.storage->mappedData != nullptr) {
                             const uint8_t* pixels = buf.storage->mappedData + buf.offset;
                             blitBufferToWindow(pixels, buf.width, buf.height, buf.stride, buf.format);
+                        } else if (surface.isCursor) {
+                            // Cache the client cursor sprite for the overlay compositor.
+                            captureCursorImage(buf);
+                            drawCursorOverlay();
                         }
 
                         // Send wl_buffer.release event so client knows buffer is available for reuse
@@ -1889,10 +2067,18 @@ private:
                 int32_t hx = reader.readInt32();
                 int32_t hy = reader.readInt32();
                 (void)serial;
-                (void)hx;
-                (void)hy;
+                m_cursorImage.hotX = std::max(0, hx);
+                m_cursorImage.hotY = std::max(0, hy);
+                LOGI("wl_pointer.set_cursor: surface=%u hotspot=(%d,%d)", cursorSurfId, hx, hy);
                 if (cursorSurfId > 0) {
                     client.surfaces[cursorSurfId].isCursor = true;
+                } else {
+                    // set_cursor(NULL) hides the cursor.
+                    m_cursorImage.pixels.clear();
+                    m_cursorImage.width = 0;
+                    m_cursorImage.height = 0;
+                    m_cursorDrawnX = -1;
+                    m_cursorDrawnY = -1;
                 }
             } else if (opcode == 1) {
                 // wl_pointer.release
@@ -2409,6 +2595,27 @@ private:
 
     std::mutex m_inputMutex;
     TabletToolState m_tabletState;
+    // --- Overlay cursor (TASK-025) -----------------------------------------
+    // Aquamarine hands us the client cursor via wl_pointer.set_cursor; we cache
+    // its shm pixels and composite it straight into the ANativeWindow so pointer
+    // motion never forces a full 3200x2136 output re-blit.
+    struct CursorImage {
+        std::vector<uint32_t> pixels; // Android RGBA_8888, premultiplied
+        int width = 0;
+        int height = 0;
+        int hotX = 0;
+        int hotY = 0;
+        bool valid() const { return width > 0 && height > 0 && !pixels.empty(); }
+    };
+
+    CursorImage m_cursorImage;
+    std::vector<uint8_t> m_windowShadow; // clean copy of the last full frame
+    int m_shadowWidth = 0;
+    int m_shadowHeight = 0;
+    int m_shadowStride = 0;
+    int m_cursorDrawnX = -1;
+    int m_cursorDrawnY = -1;
+
     PointerState m_pointerState;
     uint32_t m_depressedModifiers{0};
     uint32_t m_lockedModifiers{0};

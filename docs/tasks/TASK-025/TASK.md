@@ -187,6 +187,64 @@ and Waybar.
    config still load (D-Bus-dependent helpers are no-ops).
 3. `hyprland/workspaces` stays disabled for the `sun_path` reason above.
 
+## 4c. Pointer latency, Quickshell shell and Kitty terminal
+
+**Pointer latency**
+
+- `WaylandSurfaceView.onGenericMotionEvent` now calls `requestUnbufferedDispatch(event)`
+  for mouse/stylus `ACTION_MOVE`/`ACTION_HOVER_MOVE`, so Android stops batching
+  pointer samples to the next VSync.
+- The pacing dead-man timer now flushes at the live refresh interval
+  (`max(1, 1000/hz)`) instead of `2 x interval`, halving worst-case callback
+  latency when host VSync callbacks pause.
+- The bridge caches the client cursor sprite (`wl_pointer.set_cursor` +
+  the cursor surface commit) for both **wl_shm** and **dma-buf** buffers,
+  keeps a clean shadow copy of the last frame, and composites the sprite at the
+  latest pointer position with dirty-rect restores — no full 3200x2136 re-blit.
+
+**Finding — hardware cursors are not exported by this backend.** With
+`cursor:no_hardware_cursors = 0`, Aquamarine's nested Wayland backend calls
+`wl_pointer.set_cursor(serial, NULL, ...)` (verified in logcat:
+`wl_pointer.set_cursor: surface=0`) and does not composite a cursor of its own,
+so **no cursor is visible at all**. `= 1` (compositor-composited software cursor)
+renders correctly. The session therefore keeps `no_hardware_cursors = 1`, and the
+overlay path stays in place for backends that do hand over a sprite. Because the
+compositor redraws its own cursor, `WLR_NO_HARDWARE_CURSORS` is no longer forced
+by ALW.
+
+**Quickshell**
+
+- `quickshell` 0.3.2 installed from `extra` (aarch64) in the guest rootfs.
+- Sekai Pop's shell (`sekaipop/`) deployed to `~/.config/quickshell/sekaipop`
+  for both `/home/alw` and `/root`; started as `qs -c sekaipop` (Waybar remains
+  the fallback when `qs` is missing).
+- New `alw-gui-run` shim resolves the compositor's Wayland socket explicitly
+  (`ls -t $XDG_RUNTIME_DIR/wayland-* | grep -v .lock`) before `exec`, because
+  `hl.exec_cmd` children sometimes inherited an empty `WAYLAND_DISPLAY`
+  (`Gtk-WARNING: cannot open display:`); it is used for kitty, hyprpaper,
+  Quickshell and the Waybar fallback.
+- `matugen` is not installed (AUR-only): the shell logs a hint and falls back to
+  its built-in palette. No `hyprctl` IPC is required for the dock/bar to render
+  (the shell degrades gracefully when the socket is missing).
+
+**Kitty**
+
+- `~/.config/kitty/kitty.conf` for both homes with the Sekai Pop palette:
+  `background #2a293d`, `background_opacity 0.88`, `foreground #d9fff6`,
+  `cursor #04feee`, `selection_background #555473`, accents `#04feee`/`#00ffcb`,
+  `font_family JetBrainsMono Nerd Font`, `font_size 12.0`,
+  `window_padding_width 14`.
+- `hl.on("hyprland.start")` launches
+  `alw-gui-run kitty --hold -e /bin/bash -c "fastfetch; exec bash"` and the
+  `^(kitty)$` window rule floats/centers it at 62% x 62%.
+
+| AC | Criterion | Status |
+|----|-----------|--------|
+| **AC-17** | Unbuffered pointer dispatch + 1x refresh pacing | **Done** |
+| **AC-18** | Overlay cursor compositor (shm + dmabuf sprite, dirty-rect restore) | **Done** — implemented; dormant because Aquamarine never exports a sprite |
+| **AC-19** | Quickshell installed and the Sekai Pop shell/dock runs | **Done** — bar, dock, clock widget and welcome tour render |
+| **AC-20** | Kitty is the default terminal, themed with the Sekai Pop palette | **Done** |
+
 ## 5. On-device evidence (Xiaomi Pad 8, `d370854b`)
 
 ```
@@ -202,6 +260,7 @@ max_brightness=100 brightness=50
 
 Full log: [guest_shim_verification.log](evidence/guest_shim_verification.log);
 Waybar: [waybar_modules.log](evidence/waybar_modules.log);
+Quickshell: [quickshell_shell.log](evidence/quickshell_shell.log);
 desktop: [screen_hyprland_waybar_shims.png](evidence/screen_hyprland_waybar_shims.png);
 host browser: [xdg_open_host_browser.png](evidence/xdg_open_host_browser.png).
 

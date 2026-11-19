@@ -23,7 +23,6 @@ class ConfigSynthesizerTest {
         assertTrue(config.contains("hl.config({"))
         assertTrue(config.contains("xwayland = { enabled = false }"))
         assertTrue(config.contains("debug = { enable_stdout_logs = true }"))
-        assertTrue(config.contains("cursor = { no_hardware_cursors = 1 }"))
         assertTrue(config.contains("disable_hyprland_logo = true"))
 
         // Display scale and nested backend environment
@@ -31,11 +30,14 @@ class ConfigSynthesizerTest {
         assertTrue(config.contains("hl.env(\"AQ_BACKEND\", \"wayland\")"))
         assertTrue(config.contains("hl.env(\"WLR_BACKENDS\", \"wayland\")"))
         assertTrue(config.contains("hl.env(\"LIBSEAT_BACKEND\", \"noop\")"))
-        assertTrue(config.contains("hl.env(\"WLR_NO_HARDWARE_CURSORS\", \"1\")"))
+        // The nested Aquamarine backend never exports a cursor sprite, so the session
+        // keeps the compositor-composited software cursor (hardware cursors = invisible).
+        assertTrue(config.contains("cursor = { no_hardware_cursors = 1 }"))
+        assertFalse(config.contains("WLR_NO_HARDWARE_CURSORS"))
 
         // Autostart and keybindings use the Lua dispatcher API
         assertTrue(config.contains("hl.on(\"hyprland.start\", function()"))
-        assertTrue(config.contains("hl.exec_cmd(\"konsole --hold -e /bin/bash -c 'fastfetch; exec bash'\")"))
+        assertTrue(config.contains("hl.exec_cmd(\"alw-gui-run kitty --hold -e /bin/bash -c 'fastfetch; exec bash'\")"))
         assertTrue(config.contains("hl.bind(\"SUPER + Return\", hl.dsp.exec_cmd(\"kitty\"))"))
         assertTrue(config.contains("hl.bind(\"SUPER + M\", hl.dsp.exit())"))
 
@@ -95,6 +97,8 @@ class ConfigSynthesizerTest {
         // Sekai Pop rice autostart (wallpaper + PRoot-safe Waybar)
         assertTrue(config.contains("swaybg -i"))
         assertTrue(config.contains("waybar -c \$B/config.jsonc"))
+        assertTrue(config.contains("qs -c sekaipop"))
+        assertTrue(config.contains("hl.window_rule({ match = { class = \"^(kitty)$\" }"))
         assertFalse(config.contains("hyprland/workspaces"))
     }
 
