@@ -68,7 +68,7 @@ Pad 8, but the pipeline is not yet a "100% GPU workstation":
 On spike bail-out: skip to Phases 4–5 immediately (Phase 2's remaining persistence work folds
 into the Phase 4 commit window), then proceed to TASK-027.
 
-### Phase 0 — Land the in-flight graphics work (this commit)
+### Phase 0 — Land the in-flight graphics work (bulk commit `ae60856`, nit fixes in the TASK-026 Phase 0 commit)
 The working tree already contains: native `setRenderScale` (clamp 0.35–1.0, default 0.75) with
 `broadcastOutputResizeLocked` re-emitting `wl_output.mode` + `xdg_toplevel.configure` +
 `xdg_surface.configure`; `m_actualFps` (blit counter, 1 s window) with

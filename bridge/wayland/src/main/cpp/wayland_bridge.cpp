@@ -1109,30 +1109,25 @@ public:
 
         // The EGL/GLES2 presenter is opt-in: on the Xiaomi Pad 8 it initializes on the
         // Adreno 825 and swaps, but the composed frame does not reach the surface yet,
-        // so the CPU blit stays the default until that is resolved.
+        // so the CPU blit stays the default until that is resolved. presentWithGl() must
+        // run exactly once per frame (the previous two-block structure double-presented).
         static const bool s_glesPresenterEnabled = []() {
             const char* value = getenv("ALW_GLES_BLIT");
             return value != nullptr && value[0] == '1';
         }();
-        if (!s_glesPresenterEnabled) {
-            // CPU path below; EGL must not own the window in that case.
-        } else if (m_glReady && !presentWithGl(src, srcWidth, srcHeight, srcStride, format)) {
+        if (s_glesPresenterEnabled) {
+            if (presentWithGl(src, srcWidth, srcHeight, srcStride, format)) {
+                m_blitCounter.fetch_add(1, std::memory_order_relaxed);
+                static int s_glFrameLog = 0;
+                if (++s_glFrameLog % 60 == 1) {
+                    LOGI("GLES blit #%d: %dx%d (scale %.2f, fps %.1f)", s_glFrameLog,
+                         srcWidth, srcHeight, m_renderScale.load(), m_actualFps.load());
+                }
+                return;
+            }
             static int s_glDropLog = 0;
             if (++s_glDropLog % 60 == 1)
-                LOGW("GLES: frame dropped (presenter active, swap failed)");
-            return;
-        }
-
-        // Primary path (opt-in): upload to a GLES2 texture and draw through Adreno.
-        if (s_glesPresenterEnabled &&
-            presentWithGl(src, srcWidth, srcHeight, srcStride, format)) {
-            m_blitCounter.fetch_add(1, std::memory_order_relaxed);
-            static int s_glFrameLog = 0;
-            if (++s_glFrameLog % 60 == 1) {
-                LOGI("GLES blit #%d: %dx%d (scale %.2f, fps %.1f)", s_glFrameLog,
-                     srcWidth, srcHeight, m_renderScale.load(), m_actualFps.load());
-            }
-            return;
+                LOGW("GLES: presenter unavailable or swap failed; using CPU blit");
         }
 
         ANativeWindow_Buffer outBuffer;

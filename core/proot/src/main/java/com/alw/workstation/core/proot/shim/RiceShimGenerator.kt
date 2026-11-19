@@ -566,18 +566,18 @@ elif [ -x /usr/bin/fakeroot ]; then
     exec /usr/bin/fakeroot "${'$'}@"
 else
     # Guest applications render on the Adreno 825 through Turnip + Zink (Kopper).
-# The compositor itself stays on kms_swrast (GBM EGL init fails with zink on the
-# PRoot virtual DRM node), so the accelerated path is applied per application.
-export VK_ICD_FILENAMES="${'$'}{VK_ICD_FILENAMES:-/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json}"
-export VK_DRIVER_FILES="${'$'}{VK_DRIVER_FILES:-${'$'}VK_ICD_FILENAMES}"
-export MESA_LOADER_DRIVER_OVERRIDE=zink
-export GALLIUM_DRIVER=zink
-export LIBGL_ALWAYS_SOFTWARE=0
-export TU_DEBUG="${'$'}{TU_DEBUG:-noconform}"
-export MESA_VK_WSI_PRESENT_MODE="${'$'}{MESA_VK_WSI_PRESENT_MODE:-immediate}"
-export MESA_GL_VERSION_OVERRIDE="${'$'}{MESA_GL_VERSION_OVERRIDE:-4.6}"
+    # The compositor itself stays on kms_swrast (GBM EGL init fails with zink on the
+    # PRoot virtual DRM node), so the accelerated path is applied per application.
+    export VK_ICD_FILENAMES="${'$'}{VK_ICD_FILENAMES:-/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json}"
+    export VK_DRIVER_FILES="${'$'}{VK_DRIVER_FILES:-${'$'}VK_ICD_FILENAMES}"
+    export MESA_LOADER_DRIVER_OVERRIDE=zink
+    export GALLIUM_DRIVER=zink
+    export LIBGL_ALWAYS_SOFTWARE=0
+    export TU_DEBUG="${'$'}{TU_DEBUG:-noconform}"
+    export MESA_VK_WSI_PRESENT_MODE="${'$'}{MESA_VK_WSI_PRESENT_MODE:-immediate}"
+    export MESA_GL_VERSION_OVERRIDE="${'$'}{MESA_GL_VERSION_OVERRIDE:-4.6}"
 
-exec "${'$'}@"
+    exec "${'$'}@"
 fi
 """
 
