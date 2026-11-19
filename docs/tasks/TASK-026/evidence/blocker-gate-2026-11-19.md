@@ -54,6 +54,40 @@ blur/shadow + Turnip/Zink apps).
 
 ## 3. Step 3 — zero-copy AHB/EGLImage import (`wayland_bridge.cpp`)
 
+### On-device probe result (measured, Xiaomi Pad 8, Adreno 825)
+
+The build *was* installed once over USB at 21:44 and the probe ran:
+
+```
+dmabuf: probe image_base=1 native_buffer=1 native_client_buffer=1 -> zero-copy available
+dmabuf: AHardwareBuffer_createFromHandle rejected (rc=-1); using mmap fallback
+```
+
+So the EGL extensions are all present, but **HyperOS gralloc rejects the
+PRoot-emulated `native_handle`** (`rc=-1`), exactly as anticipated. A second, more
+fundamental problem surfaced from the same logs:
+
+```
+dmabuf: mmap fallback blit active (2400x1602 stride=9728 fmt=0x34325258)
+```
+
+Guest rows are **64-byte padded**: stride 9728 for 2400 px (2560 would be tight).
+An `AHardwareBuffer_Desc` describes a tightly packed image, so the AHB route could never
+represent these buffers even if gralloc accepted them.
+
+### Consequence: two import routes
+
+1. **`EGL_EXT_image_dma_buf_import` (preferred, new).** `presentDmabufViaEglImage()`
+   imports `plane.fd` straight into an `EGLImage` with explicit
+   `EGL_DMA_BUF_PLANE0_PITCH_EXT`/`OFFSET_EXT`. This bypasses gralloc entirely and
+   handles the padded stride, so it is the path that can actually work here.
+2. **`AHardwareBuffer` (secondary).** Kept, but now only attempted when the layout is
+   tight (`stride == width * 4`); otherwise it is skipped instead of failing every frame.
+
+Both fall through per frame to the proven mmap/CPU path.
+
+### Earlier implementation notes (still accurate)
+
 Added after the proven `presentWithGl()` path, keeping the CPU paths untouched:
 
 - `DmabufImportProbe` — one-shot, cached probe of `EGL_KHR_image_base`,
@@ -127,6 +161,19 @@ property and requires root). Non-root ADB cannot change it.
 **This is a device/HyperOS policy block, not a defect in the build.** It needs either a root
 shell, or a manual install on the device (tap the APK), or the user re-arming MIUI's ADB
 install approval flow. Until then the gate cannot be measured.
+
+### Update: USB-connected retry (same day, ~21:44–21:55)
+
+With the tablet attached over USB (`d370854b`), **one** install succeeded and the probe
+evidence in §3 was captured from it. Subsequent commits of the next build failed again with
+the same silent 25 s `INSTALL_CANCELED_BY_USER`. The block is therefore **intermittent**, not
+absolute: ~1 success in 5–8 attempts, with no reliable trigger (neither foregrounding vs.
+backgrounding the commit, nor screenshot activity, reproduced it deterministically).
+
+Practical conclusion for the follow-up session: keep retrying the `pm install-create` /
+`install-write` / `install-commit` loop until one lands, or install the APK manually on the
+device. The current build on the tablet is from 21:44; the later
+`EGL_EXT_image_dma_buf_import` work is **not yet on the device**.
 
 ## 5. Verification that *was* possible (host side)
 

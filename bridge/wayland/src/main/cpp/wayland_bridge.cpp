@@ -15,6 +15,16 @@
 #ifndef EGL_OPENGL_ES3_BIT
 #define EGL_OPENGL_ES3_BIT 0x0040
 #endif
+// EGL_EXT_image_dma_buf_import: import the guest's dma-buf fd directly, with an
+// explicit pitch. This avoids HyperOS gralloc entirely (which rejects our
+// PRoot-emulated native_handle) and handles the 64-byte-padded guest stride.
+#ifndef EGL_LINUX_DMA_BUF_EXT
+#define EGL_LINUX_DMA_BUF_EXT 0x3270
+#define EGL_LINUX_DRM_FOURCC_EXT 0x3271
+#define EGL_DMA_BUF_PLANE0_FD_EXT 0x3272
+#define EGL_DMA_BUF_PLANE0_OFFSET_EXT 0x3273
+#define EGL_DMA_BUF_PLANE0_PITCH_EXT 0x3274
+#endif
 #include <android/native_window_jni.h>
 #include <android/hardware_buffer.h>
 #include <sys/system_properties.h>
@@ -923,6 +933,8 @@ public:
         PFNEGLCREATEIMAGEKHRPROC createImage = nullptr;
         PFNEGLDESTROYIMAGEKHRPROC destroyImage = nullptr;
         PFNGLEGLIMAGETARGETTEXTURE2DOESPROC imageTargetTexture = nullptr;
+        /** EGL_EXT_image_dma_buf_import: direct fd import, no gralloc involvement. */
+        bool eglImageDmaBuf = false;
         bool ok = false;
         bool probed = false;
     };
@@ -946,6 +958,7 @@ public:
         const bool eglImageBase = hasExt(eglExt, "EGL_KHR_image_base");
         const bool nativeBuffer = hasExt(eglExt, "EGL_ANDROID_image_native_buffer");
         const bool nativeClientBuffer = hasExt(eglExt, "EGL_ANDROID_get_native_client_buffer");
+        const bool dmaBufImport = hasExt(eglExt, "EGL_EXT_image_dma_buf_import");
 
         m_importProbe.getNativeClientBuffer =
             reinterpret_cast<PFNEGLGETNATIVECLIENTBUFFERANDROIDPROC>(
@@ -957,15 +970,23 @@ public:
         m_importProbe.imageTargetTexture = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
             eglGetProcAddress("glEGLImageTargetTexture2DOES"));
 
+        m_importProbe.eglImageDmaBuf = dmaBufImport && eglImageBase &&
+            m_importProbe.createImage != nullptr &&
+            m_importProbe.destroyImage != nullptr &&
+            m_importProbe.imageTargetTexture != nullptr;
+
         m_importProbe.ok = eglImageBase && nativeBuffer && nativeClientBuffer &&
             m_importProbe.getNativeClientBuffer != nullptr &&
             m_importProbe.createImage != nullptr &&
             m_importProbe.destroyImage != nullptr &&
             m_importProbe.imageTargetTexture != nullptr;
 
-        LOGI("dmabuf: probe image_base=%d native_buffer=%d native_client_buffer=%d -> %s",
+        LOGI("dmabuf: probe image_base=%d native_buffer=%d native_client_buffer=%d "
+             "ext_image_dma_buf_import=%d -> %s",
              eglImageBase ? 1 : 0, nativeBuffer ? 1 : 0, nativeClientBuffer ? 1 : 0,
-             m_importProbe.ok ? "zero-copy available" : "mmap fallback");
+             dmaBufImport ? 1 : 0,
+             m_importProbe.eglImageDmaBuf ? "zero-copy (dmabuf import)"
+                 : (m_importProbe.ok ? "zero-copy (AHB)" : "mmap fallback"));
         return m_importProbe;
     }
 
@@ -1019,6 +1040,73 @@ public:
         return true;
     }
 
+    // Attempts zero-copy via EGL_EXT_image_dma_buf_import: the plane fd is imported
+    // straight into an EGLImage with an explicit pitch, so padded guest strides are
+    // fine and HyperOS gralloc is not involved at all. Returns false to fall back.
+    bool presentDmabufViaEglImage(const DmabufBuffer& buffer, const DmabufPlane& plane) {
+        if (!m_glReady) return false;
+        DmabufImportProbe& probe = dmabufImportProbe();
+        if (!probe.eglImageDmaBuf) return false;
+        if (probe.createImage == nullptr || probe.destroyImage == nullptr ||
+            probe.imageTargetTexture == nullptr) return false;
+        if (plane.fd < 0 || plane.stride == 0) return false;
+
+        // DRM fourcc for the two formats the bridge advertises.
+        uint32_t fourcc = 0;
+        if (buffer.format == DRM_FORMAT_ARGB8888) fourcc = 0x34325241u; // 'AR24'
+        else if (buffer.format == DRM_FORMAT_XRGB8888) fourcc = 0x34325258u; // 'XR24'
+        if (fourcc == 0) return false;
+
+        const EGLint attrs[] = {
+            EGL_LINUX_DRM_FOURCC_EXT, static_cast<EGLint>(fourcc),
+            EGL_WIDTH, buffer.width,
+            EGL_HEIGHT, buffer.height,
+            EGL_DMA_BUF_PLANE0_FD_EXT, plane.fd,
+            EGL_DMA_BUF_PLANE0_OFFSET_EXT, static_cast<EGLint>(plane.offset),
+            EGL_DMA_BUF_PLANE0_PITCH_EXT, static_cast<EGLint>(plane.stride),
+            EGL_NONE
+        };
+        const EGLImageKHR image = probe.createImage(
+            m_eglDisplay, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, attrs);
+        if (image == EGL_NO_IMAGE_KHR) {
+            static int s_dmaFailLog = 0;
+            if (++s_dmaFailLog <= 3)
+                LOGW("dmabuf: eglCreateImageKHR(dma_buf) failed (0x%x); using mmap",
+                     eglGetError());
+            return false;
+        }
+
+        if (!eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext)) {
+            probe.destroyImage(m_eglDisplay, image);
+            return false;
+        }
+
+        GLuint texture = 0;
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        probe.imageTargetTexture(GL_TEXTURE_2D, image);
+
+        const bool presented = presentImportedTexture(texture, buffer.width, buffer.height);
+
+        glDeleteTextures(1, &texture);
+        probe.destroyImage(m_eglDisplay, image);
+        if (!presented) return false;
+
+        m_zeroCopyFrames.fetch_add(1, std::memory_order_relaxed);
+        m_blitCounter.fetch_add(1, std::memory_order_relaxed);
+        static int s_dmaFrameLog = 0;
+        if (++s_dmaFrameLog % 60 == 1) {
+            LOGI("dmabuf: path=egl-dmabuf zero-copy frame (%dx%d stride=%u, total %llu)",
+                 buffer.width, buffer.height, plane.stride,
+                 static_cast<unsigned long long>(m_zeroCopyFrames.load()));
+        }
+        return true;
+    }
+
     // Attempts the zero-copy path for one plane. Returns false to let the caller fall
     // back to the CPU copy; never fatal, because HyperOS gralloc can reject the import.
     bool presentDmabufZeroCopy(const DmabufBuffer& buffer, const DmabufPlane& plane) {
@@ -1039,6 +1127,9 @@ public:
         // The bridge advertises DRM_FORMAT_MOD_LINEAR buffers only, so a single plane
         // with no offset is the only case the adapter can represent as a simple image.
         if (plane.offset != 0) return false;
+        // AHardwareBuffer_desc describes a tightly packed image; the guest rows are
+        // padded to 64 bytes (stride 9728 for 2400 px), so this path only applies when
+        // they happen to match. presentDmabufViaEglImage() handles the padded case.
         if (plane.stride != static_cast<uint32_t>(buffer.width) * 4) return false;
 
         struct __attribute__((packed)) RawNativeHandle {
@@ -2193,9 +2284,15 @@ private:
                 return false;
             return true;
         }();
-        if (s_zeroCopyEnabled && m_glReady &&
-            presentDmabufZeroCopy(*buffer, plane)) {
-            return true;
+        if (s_zeroCopyEnabled && m_glReady) {
+            // Preferred: direct dma-buf fd import (handles padded stride, no gralloc).
+            if (presentDmabufViaEglImage(*buffer, plane)) {
+                return true;
+            }
+            // Secondary: AHardwareBuffer import, only when the layout is tight.
+            if (presentDmabufZeroCopy(*buffer, plane)) {
+                return true;
+            }
         }
 
         // Primary: import as AHardwareBuffer (zero-copy gralloc path when accepted).
