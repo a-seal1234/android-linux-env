@@ -14,9 +14,11 @@ import com.alw.workstation.core.proot.driver.TurnipDriverManager
 import com.alw.workstation.core.proot.shizuku.ShizukuCompanionManager
 import com.alw.workstation.core.proot.shizuku.ShizukuCompanionState
 import com.alw.workstation.core.session.CompositorOrchestrator
+import com.alw.workstation.core.session.GuestProcessReaper
 import com.alw.workstation.core.session.ProfileRepository
 import com.alw.workstation.core.session.SessionController
 import com.alw.workstation.core.session.SessionState
+import com.alw.workstation.core.session.isLiveSession
 import com.alw.workstation.core.session.model.StackProfile
 import com.alw.workstation.core.session.rice.RiceHostBridge
 import kotlinx.coroutines.CoroutineDispatcher
@@ -51,12 +53,14 @@ class DashboardViewModel(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
     private val appContext: Context? = null,
-    private val sessionWindowProvider: (() -> Window?)? = null
+    private val sessionWindowProvider: (() -> Window?)? = null,
+    private val guestProcessReaper: GuestProcessReaper? = null
 ) {
     private var riceHostBridge: RiceHostBridge? = null
 
     private val sessionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var audioCoordinateJob: Job? = null
+    private var launchJob: Job? = null
 
     private val _uiState = MutableStateFlow(DashboardUiState())
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
@@ -172,6 +176,21 @@ class DashboardViewModel(
     }
 
     fun launchSession(scope: CoroutineScope = sessionScope) {
+        // TASK-035: never stack a second compositor on one bridge output. A live
+        // session is stopped first, and guests orphaned by a previous app instance
+        // (installer SIGKILL / crash) are reaped before the new tree spawns. The
+        // native server state survives Activity recreation (where a fresh
+        // sessionController reads Idle), so it is the authoritative liveness signal.
+        val sessionAlive = sessionController.sessionState.value.isLiveSession() ||
+            serverManager?.isRunning() == true
+        if (sessionAlive) {
+            stopSession()
+        }
+        val reaped = guestProcessReaper?.reapOrphanedGuests().orEmpty()
+        if (reaped.isNotEmpty()) {
+            Log.i("ALW::Dashboard", "Reaped orphaned guest processes: $reaped")
+        }
+
         val profile = _uiState.value.activeProfile ?: StackProfile.defaultArchXiaomiPad8()
         val rootfsDir = dirs.getRootfsDir(profile.distro.rootfsId)
         val runtimeDir = dirs.getRuntimeSocketDir("session-${profile.id}")
@@ -198,7 +217,7 @@ class DashboardViewModel(
         _uiState.update { it.copy(sessionState = SessionState.Running(profile, 0L)) }
 
         if (orchestrator != null) {
-            scope.launch(ioDispatcher) {
+            launchJob = scope.launch(ioDispatcher) {
                 val outcome = orchestrator.launchSession(
                     profile = profile,
                     sessionRuntimeDir = runtimeDir,
@@ -282,6 +301,8 @@ class DashboardViewModel(
     }
 
     fun stopSession() {
+        launchJob?.cancel()
+        launchJob = null
         SessionInputBus.setSessionFocused(false)
         serverManager?.clearKeyboardModifiers()
         stopRiceHostBridge()

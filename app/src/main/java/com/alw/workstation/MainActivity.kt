@@ -160,7 +160,8 @@ class MainActivity : ComponentActivity() {
             shizukuManager = shizukuCompanionManager,
             serverManager = serverManager,
             appContext = applicationContext,
-            sessionWindowProvider = { window }
+            sessionWindowProvider = { window },
+            guestProcessReaper = com.alw.workstation.core.session.GuestProcessReaper()
         )
 
         stackConfiguratorViewModel = StackConfiguratorViewModel(
