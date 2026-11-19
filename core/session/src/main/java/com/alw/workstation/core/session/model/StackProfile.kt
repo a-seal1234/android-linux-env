@@ -54,7 +54,13 @@ data class StackProfile(
         val kgslNode: String = "/dev/kgsl-3d0",
         val mesaLoaderOverride: String? = null,
         val environmentOverrides: Map<String, String> = emptyMap(),
-        val tuDebugNoConform: Boolean = false
+        val tuDebugNoConform: Boolean = false,
+        /**
+         * TASK-026 Phase 3b research toggle: run the compositor itself on Turnip+Zink
+         * instead of the verified kms_swrast split. Off by default — the split is the
+         * shipped, verified configuration.
+         */
+        val forceCompositorZink: Boolean = false
     )
 
     enum class DriverMode {
@@ -156,6 +162,7 @@ data class StackProfile(
                 put("kgslNode", gpu.kgslNode)
                 gpu.mesaLoaderOverride?.let { put("mesaLoaderOverride", it) }
                 put("tuDebugNoConform", gpu.tuDebugNoConform)
+                put("forceCompositorZink", gpu.forceCompositorZink)
                 put("environmentOverrides", JSONObject(gpu.environmentOverrides))
             })
             put("display", JSONObject().apply {
@@ -261,7 +268,8 @@ data class StackProfile(
                     kgslNode = gpuObj.optString("kgslNode", "/dev/kgsl-3d0"),
                     mesaLoaderOverride = gpuObj.optString("mesaLoaderOverride").takeIf { it.isNotBlank() },
                     environmentOverrides = envOverrides,
-                    tuDebugNoConform = gpuObj.optBoolean("tuDebugNoConform", false)
+                    tuDebugNoConform = gpuObj.optBoolean("tuDebugNoConform", false),
+                    forceCompositorZink = gpuObj.optBoolean("forceCompositorZink", false)
                 ),
                 display = DisplayConfig(
                     resolutionMode = ResolutionMode.valueOf(displayObj.optString("resolutionMode", "NATIVE").uppercase()),

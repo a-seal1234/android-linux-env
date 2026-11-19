@@ -162,8 +162,21 @@ object EnvironmentGenerator {
         if (profile.compositor.type == StackProfile.CompositorType.HYPRLAND &&
             profile.gpu.driverMode != StackProfile.DriverMode.LLVMPIPE
         ) {
-            env["MESA_LOADER_DRIVER_OVERRIDE"] = "kms_swrast"
-            env.remove("GALLIUM_DRIVER")
+            if (profile.gpu.forceCompositorZink) {
+                // TASK-026 Phase 3b research path: put the compositor itself on
+                // Turnip+Zink. Off by default; see the task's bail-out rule.
+                env["MESA_LOADER_DRIVER_OVERRIDE"] = "zink"
+                env["GALLIUM_DRIVER"] = "zink"
+                env["LIBGL_ALWAYS_SOFTWARE"] = "0"
+                env["ALW_COMPOSITOR_ZINK"] = "1"
+            } else {
+                // The verified default: the compositor keeps Mesa's kms_swrast path on
+                // the PRoot virtual DRM node (zink fails GBM EGL init there), plus the
+                // immediate llvmpipe relief applied to the synthesized Hyprland config.
+                env["MESA_LOADER_DRIVER_OVERRIDE"] = "kms_swrast"
+                env.remove("GALLIUM_DRIVER")
+                env["ALW_COMPOSITOR_ZINK"] = "0"
+            }
         }
 
         return env

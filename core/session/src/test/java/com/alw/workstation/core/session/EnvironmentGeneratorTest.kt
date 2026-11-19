@@ -43,6 +43,7 @@ class EnvironmentGeneratorTest {
         // Applications get Turnip+Zink from the alw-gui-run shim instead.
         assertEquals("kms_swrast", env["MESA_LOADER_DRIVER_OVERRIDE"])
         assertNull(env["GALLIUM_DRIVER"])
+        assertEquals("0", env["ALW_COMPOSITOR_ZINK"])
 
         // Hyprland nested-backend requirements (no logind/seatd, no DRM cursor plane)
         assertEquals("noop", env["LIBSEAT_BACKEND"])
@@ -51,6 +52,19 @@ class EnvironmentGeneratorTest {
         // Audio bridge variables
         assertEquals("unix:/run/user/1000/pulse/native", env["PULSE_SERVER"])
         assertEquals("/tmp/rt", env["PIPEWIRE_RUNTIME_DIR"])
+    }
+
+    @Test
+    fun testForceCompositorZinkSwitchesTheCompositorLoader() {
+        val base = StackProfile.defaultArchXiaomiPad8()
+        val profile = base.copy(gpu = base.gpu.copy(forceCompositorZink = true))
+        val env = EnvironmentGenerator.generateEnvironment(profile, File("/tmp/runtime-1"))
+
+        // Research toggle: the compositor itself moves to Turnip+Zink.
+        assertEquals("zink", env["MESA_LOADER_DRIVER_OVERRIDE"])
+        assertEquals("zink", env["GALLIUM_DRIVER"])
+        assertEquals("0", env["LIBGL_ALWAYS_SOFTWARE"])
+        assertEquals("1", env["ALW_COMPOSITOR_ZINK"])
     }
 
     @Test

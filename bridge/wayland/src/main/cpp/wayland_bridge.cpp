@@ -3,6 +3,7 @@
 #include <android/looper.h>
 #include <android/native_window.h>
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 
@@ -906,6 +907,210 @@ public:
                      eglGetError(), surfaceWidth, surfaceHeight, width, height, stride);
             }
             return false;
+        }
+        return true;
+    }
+
+    // --- Zero-copy DMA-BUF presentation (TASK-029) -------------------------
+    //
+    // Resolves the EGL/GLES entry points needed to wrap a guest dma-buf as an
+    // AHardwareBuffer, turn it into an EGLImage and sample it directly as a texture,
+    // so a Turnip/Zink guest frame reaches the Adreno 825 without any CPU pixel copy.
+    // All of it is probed once per session; when anything is missing the caller keeps
+    // the proven mmap/CPU path.
+    struct DmabufImportProbe {
+        PFNEGLGETNATIVECLIENTBUFFERANDROIDPROC getNativeClientBuffer = nullptr;
+        PFNEGLCREATEIMAGEKHRPROC createImage = nullptr;
+        PFNEGLDESTROYIMAGEKHRPROC destroyImage = nullptr;
+        PFNGLEGLIMAGETARGETTEXTURE2DOESPROC imageTargetTexture = nullptr;
+        bool ok = false;
+        bool probed = false;
+    };
+
+    DmabufImportProbe& dmabufImportProbe() {
+        if (m_importProbe.probed) return m_importProbe;
+        m_importProbe.probed = true;
+
+        const char* eglExt = eglQueryString(m_eglDisplay, EGL_EXTENSIONS);
+        auto hasExt = [](const char* list, const char* name) {
+            if (list == nullptr) return false;
+            const size_t len = strlen(name);
+            for (const char* p = list; (p = strstr(p, name)) != nullptr; p += len) {
+                const bool startOk = (p == list) || (p[-1] == ' ');
+                const char end = p[len];
+                if (startOk && (end == ' ' || end == '\0')) return true;
+            }
+            return false;
+        };
+
+        const bool eglImageBase = hasExt(eglExt, "EGL_KHR_image_base");
+        const bool nativeBuffer = hasExt(eglExt, "EGL_ANDROID_image_native_buffer");
+        const bool nativeClientBuffer = hasExt(eglExt, "EGL_ANDROID_get_native_client_buffer");
+
+        m_importProbe.getNativeClientBuffer =
+            reinterpret_cast<PFNEGLGETNATIVECLIENTBUFFERANDROIDPROC>(
+                eglGetProcAddress("eglGetNativeClientBufferANDROID"));
+        m_importProbe.createImage = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(
+            eglGetProcAddress("eglCreateImageKHR"));
+        m_importProbe.destroyImage = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(
+            eglGetProcAddress("eglDestroyImageKHR"));
+        m_importProbe.imageTargetTexture = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
+            eglGetProcAddress("glEGLImageTargetTexture2DOES"));
+
+        m_importProbe.ok = eglImageBase && nativeBuffer && nativeClientBuffer &&
+            m_importProbe.getNativeClientBuffer != nullptr &&
+            m_importProbe.createImage != nullptr &&
+            m_importProbe.destroyImage != nullptr &&
+            m_importProbe.imageTargetTexture != nullptr;
+
+        LOGI("dmabuf: probe image_base=%d native_buffer=%d native_client_buffer=%d -> %s",
+             eglImageBase ? 1 : 0, nativeBuffer ? 1 : 0, nativeClientBuffer ? 1 : 0,
+             m_importProbe.ok ? "zero-copy available" : "mmap fallback");
+        return m_importProbe;
+    }
+
+    // Draws an imported texture with the shared quad pipeline and presents it.
+    bool presentImportedTexture(GLuint texture, int width, int height) {
+        if (!eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext))
+            return false;
+
+        EGLint surfaceWidth = 0, surfaceHeight = 0;
+        eglQuerySurface(m_eglDisplay, m_eglSurface, EGL_WIDTH, &surfaceWidth);
+        eglQuerySurface(m_eglDisplay, m_eglSurface, EGL_HEIGHT, &surfaceHeight);
+        if (surfaceWidth <= 0 || surfaceHeight <= 0) return false;
+
+        // Same aspect-preserving letterbox as the CPU upload path.
+        const float srcAspect = static_cast<float>(width) / static_cast<float>(height);
+        const float dstAspect = static_cast<float>(surfaceWidth) / static_cast<float>(surfaceHeight);
+        float scaleX = 1.0f, scaleY = 1.0f;
+        if (srcAspect > dstAspect) scaleY = dstAspect / srcAspect;
+        else scaleX = srcAspect / dstAspect;
+
+        glViewport(0, 0, surfaceWidth, surfaceHeight);
+        glDisable(GL_BLEND);
+        glDisable(GL_DEPTH_TEST);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        glUseProgram(m_glProgram);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        if (m_glSampler >= 0) glUniform1i(m_glSampler, 0);
+        if (m_glScaleUniform >= 0) glUniform2f(m_glScaleUniform, scaleX, scaleY);
+
+        glBindBuffer(GL_ARRAY_BUFFER, m_glVbo);
+        if (m_glPosAttr >= 0) {
+            glEnableVertexAttribArray(m_glPosAttr);
+            glVertexAttribPointer(m_glPosAttr, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat),
+                                  reinterpret_cast<const void*>(0));
+        }
+        if (m_glTexAttr >= 0) {
+            glEnableVertexAttribArray(m_glTexAttr);
+            glVertexAttribPointer(m_glTexAttr, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat),
+                                  reinterpret_cast<const void*>(2 * sizeof(GLfloat)));
+        }
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        if (m_glPosAttr >= 0) glDisableVertexAttribArray(m_glPosAttr);
+        if (m_glTexAttr >= 0) glDisableVertexAttribArray(m_glTexAttr);
+
+        if (eglSwapBuffers(m_eglDisplay, m_eglSurface) != EGL_TRUE) return false;
+        glBindTexture(GL_TEXTURE_2D, 0);
+        return true;
+    }
+
+    // Attempts the zero-copy path for one plane. Returns false to let the caller fall
+    // back to the CPU copy; never fatal, because HyperOS gralloc can reject the import.
+    bool presentDmabufZeroCopy(const DmabufBuffer& buffer, const DmabufPlane& plane) {
+        if (!m_glReady) return false;
+        DmabufImportProbe& probe = dmabufImportProbe();
+        if (!probe.ok) return false;
+
+        using CreateFromHandleFn = int (*)(const AHardwareBuffer_Desc*, const void*,
+                                           uint64_t, AHardwareBuffer**);
+        static CreateFromHandleFn s_createFromHandle = []() -> CreateFromHandleFn {
+            void* lib = dlopen("libandroid.so", RTLD_NOW | RTLD_LOCAL);
+            if (lib == nullptr) return nullptr;
+            return reinterpret_cast<CreateFromHandleFn>(
+                dlsym(lib, "AHardwareBuffer_createFromHandle"));
+        }();
+        if (s_createFromHandle == nullptr) return false;
+
+        // The bridge advertises DRM_FORMAT_MOD_LINEAR buffers only, so a single plane
+        // with no offset is the only case the adapter can represent as a simple image.
+        if (plane.offset != 0) return false;
+        if (plane.stride != static_cast<uint32_t>(buffer.width) * 4) return false;
+
+        struct __attribute__((packed)) RawNativeHandle {
+            int32_t version;
+            int32_t numFds;
+            int32_t numInts;
+            int32_t fd;
+        } rawHandle = { static_cast<int32_t>(sizeof(RawNativeHandle)), 1, 0, plane.fd };
+
+        AHardwareBuffer_Desc desc = {};
+        desc.width = static_cast<uint32_t>(buffer.width);
+        desc.height = static_cast<uint32_t>(buffer.height);
+        desc.layers = 1;
+        desc.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
+        desc.usage = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
+        desc.stride = static_cast<uint32_t>(buffer.width);
+
+        AHardwareBuffer* ahb = nullptr;
+        const int rc = s_createFromHandle(&desc, reinterpret_cast<const void*>(&rawHandle),
+                                          AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE, &ahb);
+        if (rc != 0 || ahb == nullptr) {
+            static int s_rejectLog = 0;
+            if (++s_rejectLog <= 3)
+                LOGW("dmabuf: zero-copy createFromHandle rejected (rc=%d); using mmap", rc);
+            return false;
+        }
+
+        // eglGetNativeClientBufferANDROID does not take ownership of the AHB.
+        EGLClientBuffer clientBuffer = probe.getNativeClientBuffer(ahb);
+        EGLImageKHR image = EGL_NO_IMAGE_KHR;
+        if (clientBuffer != nullptr) {
+            static const EGLint attrs[] = { EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, EGL_NONE };
+            image = probe.createImage(m_eglDisplay, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID,
+                                      clientBuffer, attrs);
+        }
+        if (image == EGL_NO_IMAGE_KHR) {
+            static int s_imageFailLog = 0;
+            if (++s_imageFailLog <= 3)
+                LOGW("dmabuf: eglCreateImageKHR failed (0x%x); using mmap", eglGetError());
+            AHardwareBuffer_release(ahb);
+            return false;
+        }
+
+        if (!eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext)) {
+            probe.destroyImage(m_eglDisplay, image);
+            AHardwareBuffer_release(ahb);
+            return false;
+        }
+
+        GLuint texture = 0;
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        probe.imageTargetTexture(GL_TEXTURE_2D, image);
+
+        const bool presented = presentImportedTexture(texture, buffer.width, buffer.height);
+
+        glDeleteTextures(1, &texture);
+        probe.destroyImage(m_eglDisplay, image);
+        AHardwareBuffer_release(ahb);
+
+        if (!presented) return false;
+        m_zeroCopyFrames.fetch_add(1, std::memory_order_relaxed);
+        m_blitCounter.fetch_add(1, std::memory_order_relaxed);
+        static int s_zeroCopyLog = 0;
+        if (++s_zeroCopyLog % 60 == 1) {
+            LOGI("dmabuf: path=egl zero-copy frame (%dx%d, total %llu)",
+                 buffer.width, buffer.height,
+                 static_cast<unsigned long long>(m_zeroCopyFrames.load()));
         }
         return true;
     }
@@ -1974,6 +2179,23 @@ private:
         if (blitFormat < 0) {
             LOGW("dmabuf: unsupported format 0x%x (only ARGB8888/XRGB8888 supported)", buffer->format);
             return false;
+        }
+
+        // Zero-copy first (TASK-029): import the plane as an AHardwareBuffer, wrap it
+        // in an EGLImage and sample it directly on the Adreno 825. Every failure mode
+        // (probe miss, gralloc rejection, stride/offset the adapter cannot represent,
+        // swap failure) falls through to the CPU paths below.
+        static const bool s_zeroCopyEnabled = []() {
+            const char* value = getenv("ALW_DMABUF_ZEROCOPY");
+            if (value != nullptr && value[0] == '0') return false;
+            char prop[PROP_VALUE_MAX] = {0};
+            if (__system_property_get("debug.alw.dmabuf_zerocopy", prop) > 0 && prop[0] == '0')
+                return false;
+            return true;
+        }();
+        if (s_zeroCopyEnabled && m_glReady &&
+            presentDmabufZeroCopy(*buffer, plane)) {
+            return true;
         }
 
         // Primary: import as AHardwareBuffer (zero-copy gralloc path when accepted).
@@ -3114,6 +3336,10 @@ private:
     std::atomic<float> m_renderScale{0.75f};   // 0.35 .. 1.0
     std::atomic<float> m_actualFps{0.0f};
     std::atomic<uint64_t> m_blitCounter{0};
+
+    // --- Zero-copy DMA-BUF import (TASK-029) -------------------------------
+    DmabufImportProbe m_importProbe;
+    std::atomic<uint64_t> m_zeroCopyFrames{0};
 
     CursorImage m_cursorImage;
     std::vector<uint8_t> m_windowShadow; // clean copy of the last full frame

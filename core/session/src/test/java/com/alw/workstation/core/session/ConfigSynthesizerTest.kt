@@ -41,9 +41,12 @@ class ConfigSynthesizerTest {
         assertTrue(config.contains("hl.bind(\"SUPER + Return\", hl.dsp.exec_cmd(\"kitty\"))"))
         assertTrue(config.contains("hl.bind(\"SUPER + M\", hl.dsp.exit())"))
 
-        // Hardware accelerated visuals (Turnip Adreno 825). Rounding is owned by the
-        // imported Sekai Pop theme layer, so the synthesizer does not pin it.
-        assertTrue(config.contains("blur = { enabled = true, size = 5, passes = 2 }"))
+        // The compositor renders on a software rasterizer (kms_swrast by default, or
+        // llvmpipe in Safe Mode), so blur and shadows — the dominant per-pixel cost —
+        // must be off. They are re-enabled automatically when the compositor gets the
+        // GPU via gpu.forceCompositorZink.
+        assertTrue(config.contains("blur = { enabled = false }"))
+        assertTrue(config.contains("shadow = { enabled = false }"))
 
         // No legacy INI directives may leak into the Lua session config
         assertFalse(config.contains("exec-once ="))
@@ -67,6 +70,30 @@ class ConfigSynthesizerTest {
         // Software fallback disables expensive decorations
         assertTrue(config.contains("blur = { enabled = false }"))
         assertFalse(config.contains("size = 5"))
+    }
+
+    @Test
+    fun testCompositorZinkToggleReenablesDecorations() {
+        val base = StackProfile.defaultArchXiaomiPad8()
+        val profile = base.copy(gpu = base.gpu.copy(forceCompositorZink = true))
+        val config = ConfigSynthesizer.synthesizeHyprlandSessionConfig(profile)
+
+        // With the compositor on the GPU, blur/shadow are re-enabled automatically.
+        assertTrue(config.contains("blur = { enabled = true, size = 5, passes = 2 }"))
+        assertTrue(config.contains("shadow = { enabled = true }"))
+        assertFalse(config.contains("shadow = { enabled = false }"))
+    }
+
+    @Test
+    fun testDefaultProfileDisablesExpensiveDecorations() {
+        // The default (non-LLVMPIPE) profile still soft-composites through kms_swrast,
+        // so the relief must apply there too — not only to the LLVMPIPE Safe Mode.
+        val config = ConfigSynthesizer.synthesizeHyprlandSessionConfig(
+            StackProfile.defaultArchXiaomiPad8()
+        )
+
+        assertTrue(config.contains("blur = { enabled = false }"))
+        assertTrue(config.contains("shadow = { enabled = false }"))
     }
 
     @Test

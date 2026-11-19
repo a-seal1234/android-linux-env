@@ -116,14 +116,14 @@ limits high-refresh (120/144 Hz) headroom on the Adreno 825.
 | Criterion | Description | Status |
 |---|---|---|
 | **AC-01** | Task registered with architecture, phases and this AC table | **Done** |
-| **AC-02** | On the Xiaomi Pad 8 the log reports `dmabuf: path=egl` and the desktop renders from the imported `AHardwareBuffer` (screenshot) | Planned |
-| **AC-03** | The zero-copy path performs no `AHardwareBuffer_lock()`/`mmap()` pixel read per frame (instrumented assert/log); CPU fallback unchanged and selectable via `ALW_GLES_BLIT=0` / `ALW_DMABUF_AHB=0` | Planned |
+| **AC-02** | On the Xiaomi Pad 8 the log reports `dmabuf: path=egl` and the desktop renders from the imported `AHardwareBuffer` (screenshot) | **Implemented, unverified** — code landed + built; the device refused the APK install ([gate record](../TASK-026/evidence/blocker-gate-2026-11-19.md) §4) |
+| **AC-03** | The zero-copy path performs no `AHardwareBuffer_lock()`/`mmap()` pixel read per frame (instrumented assert/log); CPU fallback unchanged and selectable via `ALW_GLES_BLIT=0` / `ALW_DMABUF_AHB=0` | **Implemented, unverified** — `presentDmabufZeroCopy()` does no lock/mmap/`glTexSubImage2D`; `ALW_DMABUF_ZEROCOPY=0` selects the old path |
 | **AC-04** | Colour order and aspect letterbox are correct at render scale 0.5× and 1.0× (screenshots + test pattern) | Planned |
 | **AC-05** | Buffer lifecycle is safe: deferred `wl_buffer.release`, no double-present, sustained 10-minute session without stalls or leaks | Planned |
 | **AC-06** | If HyperOS gralloc rejects `createFromHandle` the bridge falls back to mmap without crashing; `ALW_DMABUF_AHB=0` reproduces the current path | Planned |
 | **AC-07** | `nativeGetActualFps()` counts the zero-copy path; FPS pill/`alw-host-query fps` still report live values | Planned |
 | **AC-08** | Unit tests + `./gradlew assembleDebug` green; evidence in `docs/tasks/TASK-029/evidence/`; commit pushed to `origin/main` | Planned |
-| **AC-09** | **Gate contribution:** with this task landed, the presentation path performs **zero CPU pixel copies** per frame, and together with the TASK-026 relief + compositor work the pipeline sustains **>= 30 FPS during active window movement/animation** on the Xiaomi Pad 8 (60 FPS target) — the verdict that unblocks TASK-027/028 | Planned |
+| **AC-09** | **Gate contribution:** with this task landed, the presentation path performs **zero CPU pixel copies** per frame, and together with the TASK-026 relief + compositor work the pipeline sustains **>= 30 FPS during active window movement/animation** on the Xiaomi Pad 8 (60 FPS target) — the verdict that unblocks TASK-027/028 | **Not met** — unmeasured (install blocked); TASK-027/028 remain Blocked |
 
 ## 5. Verification Plan
 

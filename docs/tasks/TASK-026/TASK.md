@@ -137,6 +137,13 @@ platform section. Add a session-time watchdog: scan the session log for `llvmpip
 strings in guest apps and surface a HUD warning when detected.
 
 ### Phase 3b — Compositor-zink spike (time-boxed, bail-out rule)
+**Status (2026-11-19): plumbing landed, spike attempt not run.** The toggle
+(`gpu.forceCompositorZink`, `ALW_COMPOSITOR_ZINK`) is implemented and unit-tested, but the
+attempt requires installing the build on the device, which HyperOS refused (see
+[blocker-gate-2026-11-19.md](evidence/blocker-gate-2026-11-19.md) §4). Existing on-device
+evidence stands: zink fails GBM EGL init on the virtual DRM node, so the **bail-out rule is
+applied — toggle off by default, hybrid split retained**.
+
 Run **after Phase 1 is verified working on the `kms_swrast` compositor** (Phase 1 is done — the
 host blit is GPU by default and the desktop is visually verified). Goal:
 full end-to-end GPU rendering for Hyprland too. Maximum **2 focused attempts** behind the
@@ -212,3 +219,17 @@ older rootfs → fall back to the bash launch; `SHELL` env already follows the p
   enforced); anything else falls back to the CPU path for correctness.
 - **Regression risk to the working session** → the presenter and the zink toggle are opt-in;
   LabWC Safe Mode and the TASK-023/024/025 behaviour remain untouched.
+
+## 7. GPU Blocker Gate execution (2026-11-19)
+
+Full record: [blocker-gate-2026-11-19.md](evidence/blocker-gate-2026-11-19.md).
+
+- **llvmpipe relief — done.** `ConfigSynthesizer` now treats the compositor as software not
+  only for `LLVMPIPE` but for every profile that is not on `forceCompositorZink` (i.e. the
+  `kms_swrast` default). Blur **and** shadows are disabled there and re-enabled automatically
+  on the GPU path. This was a live bug: the default 1–2 FPS profile was rendering with
+  `blur = { enabled = true, size = 5, passes = 2 }`.
+- **Zero-copy AHB/EGLImage — implemented in TASK-029 scope**, not yet verified on-device.
+- **Gate verdict: not met / not measured.** HyperOS refused every APK install (silent 25 s
+  `INSTALL_CANCELED_BY_USER`, no confirmation UI, `persist.security.adbinstall=1`), so neither
+  the spike nor the FPS measurement ran. **TASK-027 and TASK-028 stay Blocked.**
