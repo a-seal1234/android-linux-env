@@ -8,6 +8,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- TASK-027: one-time ADB-grantable permission so AccessibilityHealer can
+         enable the key-intercept service without Shizuku -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
 
     <!-- Shizuku package visibility for Android 11+ -->
     <queries>
@@ -44,6 +47,21 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Linux development workstation session hosting PRoot container and Wayland compositor" />
+        </service>
+
+        <!-- TASK-027: session-scoped hardware key interceptor (Super/Alt+Tab/Esc
+             before HyperOS). Enabled via AccessibilityHealer (Shizuku/ADB). -->
+        <service
+            android:name=".service.AlwKeyInterceptService"
+            android:exported="false"
+            android:label="ALW Wayland Keyboard Bridge"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/alw_key_intercept_config" />
         </service>
 
         <!-- Optional Shizuku Companion Provider for privileged UID 2000 operations -->

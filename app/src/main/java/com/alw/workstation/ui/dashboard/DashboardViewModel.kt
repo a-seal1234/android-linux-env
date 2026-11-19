@@ -5,6 +5,7 @@ import android.util.Log
 import android.view.Window
 import com.alw.workstation.bridge.wayland.audio.AudioBridgeManager
 import com.alw.workstation.bridge.wayland.input.InputProfile
+import com.alw.workstation.bridge.wayland.input.SessionInputBus
 import com.alw.workstation.core.proot.RootfsExtractor
 import com.alw.workstation.core.proot.RootfsManager
 import com.alw.workstation.core.proot.RootfsManager.RootfsInfo
@@ -21,7 +22,9 @@ import com.alw.workstation.core.session.rice.RiceHostBridge
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -53,6 +56,7 @@ class DashboardViewModel(
     private var riceHostBridge: RiceHostBridge? = null
 
     private val sessionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var audioCoordinateJob: Job? = null
 
     private val _uiState = MutableStateFlow(DashboardUiState())
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
@@ -64,7 +68,7 @@ class DashboardViewModel(
 
     private fun observeShizukuState() {
         val manager = shizukuManager ?: return
-        CoroutineScope(ioDispatcher).launch {
+        sessionScope.launch(ioDispatcher) {
             manager.companionState.collect { companionState ->
                 withContext(mainDispatcher) {
                     _uiState.update { it.copy(shizukuState = companionState) }
@@ -183,8 +187,9 @@ class DashboardViewModel(
         // Start Wayland protocol server
         serverManager?.startServer(runtimeDir, width, height, scale)
 
-        // Start audio bridge and attach to session
-        audioBridgeManager.coordinateWith(sessionController, runtimeDir, scope)
+        // Start audio bridge and attach to session (one live collector per session launch)
+        audioCoordinateJob?.cancel()
+        audioCoordinateJob = audioBridgeManager.coordinateWith(sessionController, runtimeDir, scope)
 
         // TASK-025: expose battery / brightness / volume / network / open to guest rices.
         startRiceHostBridge(runtimeDir)
@@ -277,12 +282,24 @@ class DashboardViewModel(
     }
 
     fun stopSession() {
+        SessionInputBus.setSessionFocused(false)
+        serverManager?.clearKeyboardModifiers()
         stopRiceHostBridge()
         serverManager?.stopServer()
         sessionController.stopSession()
         audioBridgeManager.stopAudioServer()
         _uiState.update { it.copy(sessionState = SessionState.Stopped) }
         refresh()
+    }
+
+    /**
+     * Releases ViewModel-scoped coroutines (launch monitor, Shizuku collector,
+     * audio coordinator). Called from `MainActivity.onDestroy`; a running session
+     * and its native singletons are intentionally left alive so an Activity
+     * recreation re-attaches to them.
+     */
+    fun destroy() {
+        sessionScope.cancel()
     }
 
     fun switchCompositor(type: StackProfile.CompositorType) {

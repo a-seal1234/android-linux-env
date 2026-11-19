@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <arpa/inet.h>
+#include <pthread.h>
 
 #include <cstring>
 #include <algorithm>
@@ -257,6 +258,7 @@ void AudioBridgeServer::stop() {
 }
 
 void AudioBridgeServer::serverLoop() {
+    pthread_setname_np(pthread_self(), "alw-audio-loop");
     std::map<int, std::vector<uint8_t>> clientBuffers;
 
     while (m_running.load()) {

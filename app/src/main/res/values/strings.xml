@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="alw_key_intercept_description">Forwards hardware keys (Super, Alt+Tab, Esc) to the Linux workstation session while the desktop is focused. System keys are untouched outside the session.</string>
+</resources>

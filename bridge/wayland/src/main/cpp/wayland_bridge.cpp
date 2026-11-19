@@ -66,6 +66,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <thread>
+#include <pthread.h>
 #include <atomic>
 #include <mutex>
 #include <cstring>
@@ -1855,6 +1856,31 @@ public:
         }
     }
 
+    // TASK-027: release every tracked depressed modifier (session focus loss /
+    // stop) so no Shift 0x1 / Ctrl 0x4 / Alt 0x8 / Super 0x40 bit lingers in the
+    // guest. CapsLock locked state is preserved; the change-deduped broadcast is
+    // reused so clients only see one modifiers event.
+    void clearKeyboardModifiers() {
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
+
+        m_depressedModifiers = 0;
+
+        for (auto& pair : m_clients) {
+            auto& client = pair.second;
+            if (client.keyboardId > 0 && client.lastSentModifiers != 0) {
+                WaylandMessageWriter modMsg(client.keyboardId, 4); // modifiers
+                modMsg.putUint32(nextSerial());
+                modMsg.putUint32(0);
+                modMsg.putUint32(0);
+                modMsg.putUint32(m_lockedModifiers);
+                modMsg.putUint32(0);
+                sendPacket(client.fd, modMsg);
+                client.lastSentModifiers = 0;
+            }
+        }
+    }
+
     void sendTouchEvent(int action, int touchId, float x, float y) {
         std::lock_guard<std::mutex> lock(m_inputMutex);
         std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
@@ -1978,6 +2004,7 @@ private:
     }
 
     void pacingLoop() {
+        pthread_setname_np(pthread_self(), "alw-wayland-pacing");
         int wakeFds[2] = {-1, -1};
         if (pipe2(wakeFds, O_NONBLOCK | O_CLOEXEC) < 0) {
             LOGE("Frame pacing: pipe2 failed: %s", strerror(errno));
@@ -3265,6 +3292,7 @@ private:
     }
 
     void eventLoop() {
+        pthread_setname_np(pthread_self(), "alw-wayland-event");
         LOGI("Wayland server listener event loop started");
         std::vector<struct pollfd> pollFds;
 
@@ -3845,6 +3873,14 @@ Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSendKeyEvent(
 ) {
     getServer()->sendKeyEvent(scanCode, isDown == JNI_TRUE,
                               static_cast<uint32_t>(metaState));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeClearKeyboardModifiers(
+    JNIEnv* env,
+    jobject thiz
+) {
+    getServer()->clearKeyboardModifiers();
 }
 
 extern "C" JNIEXPORT void JNICALL

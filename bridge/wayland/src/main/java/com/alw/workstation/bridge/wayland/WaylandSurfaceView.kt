@@ -14,6 +14,7 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import com.alw.workstation.bridge.wayland.input.DefaultMotionEventStylusProvider
 import com.alw.workstation.bridge.wayland.input.InputProfile
+import com.alw.workstation.bridge.wayland.input.SessionInputBus
 import com.alw.workstation.bridge.wayland.input.XiaomiPenStylusProvider
 
 /**
@@ -87,6 +88,27 @@ class WaylandSurfaceView @JvmOverloads constructor(
             applyInputProfile(value)
         }
 
+    /** True from [surfaceCreated] until [surfaceDestroyed] (TASK-027 focus gating). */
+    private var surfaceActive = false
+
+    /**
+     * Session-focus gate for the AccessibilityService key bridge: published to
+     * [SessionInputBus] so `AlwKeyInterceptService` only consumes keys while this
+     * surface is live AND the window holds focus. A focus loss also releases every
+     * tracked XKB modifier (stuck-modifier hygiene) and GAMING_RAW pointer capture.
+     */
+    private fun updateSessionFocus() {
+        val focused = surfaceActive && hasWindowFocus()
+        val wasFocused = SessionInputBus.isSessionFocused
+        SessionInputBus.setSessionFocused(focused)
+        if (wasFocused && !focused) {
+            serverManager?.clearKeyboardModifiers()
+            if (hasPointerCapture()) {
+                releasePointerCapture()
+            }
+        }
+    }
+
     init {
         setZOrderOnTop(true)
         holder.setFormat(android.graphics.PixelFormat.RGBA_8888)
@@ -115,11 +137,15 @@ class WaylandSurfaceView @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        SessionInputBus.keyEventDispatcher = { event ->
+            inputDispatcher?.handleKeyEvent(event) ?: false
+        }
         displayManager?.registerDisplayListener(displayListener, null)
         display?.let { pushRefreshRate(it) }
     }
 
     override fun onDetachedFromWindow() {
+        SessionInputBus.keyEventDispatcher = null
         displayManager?.unregisterDisplayListener(displayListener)
         super.onDetachedFromWindow()
     }
@@ -137,12 +163,15 @@ class WaylandSurfaceView @JvmOverloads constructor(
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
+        updateSessionFocus()
         if (hasWindowFocus) {
             applyInputProfile(inputProfile)
         }
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
+        surfaceActive = true
+        updateSessionFocus()
         display?.let { pushRefreshRate(it, applySurfaceFrameRate = true) }
         serverManager?.attachSurface(holder.surface)
         startVsyncPacing()
@@ -158,6 +187,8 @@ class WaylandSurfaceView @JvmOverloads constructor(
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
+        surfaceActive = false
+        updateSessionFocus()
         stopVsyncPacing()
         serverManager?.detachSurface()
     }

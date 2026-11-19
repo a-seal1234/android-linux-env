@@ -114,6 +114,7 @@ class WaylandServerManager {
     private external fun nativeSendPointerAxis(axis: Int, value: Float)
     private external fun nativeSendKeyEvent(scanCode: Int, isDown: Boolean, metaState: Int)
     private external fun nativeSendTouchEvent(action: Int, touchId: Int, x: Float, y: Float)
+    private external fun nativeClearKeyboardModifiers()
     private external fun nativeStopServer()
 
     // Host JVM Mock State (active when isNativeLoaded is false)
@@ -372,6 +373,18 @@ class WaylandServerManager {
             nativeSendTouchEvent(action, touchId, x, y)
         } else {
             mockTouchEvents.add(MockTouchRecord(action, touchId, x, y))
+        }
+    }
+
+    /**
+     * Releases every tracked depressed XKB modifier (Shift 0x1, Ctrl 0x4, Alt 0x8,
+     * Super 0x40) and re-broadcasts `wl_keyboard.modifiers`. Used on session focus
+     * loss so a modifier key-up swallowed before the event reached us can never
+     * leave a stuck bit in the guest (TASK-027).
+     */
+    fun clearKeyboardModifiers() {
+        if (isNativeLoaded) {
+            nativeClearKeyboardModifiers()
         }
     }
 

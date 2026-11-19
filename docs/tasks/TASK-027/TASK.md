@@ -8,7 +8,7 @@
 **Planning workspace / branch / base:** `/media/DATA/project/android-linux-env` / `main`  
 **Write scope:** `app/`, `bridge/wayland/`, `docs/tasks/TASK-027/`  
 **Risk:** High  
-**Status:** **Planned** — spec registered; implementation starts after TASK-026 Phase 0/1.  
+**Status:** **In Progress** — claimed 2026-11-19 (CommandCode / local Linux) after the GPU Blocker Gate passed for practical usability (~30 FPS active). Phases 1–4 implemented and unit-tested; Phases 5–6 (on-device key/pointer verification) pending.  
 **Depends on:** TASK-008 (pointer capture, scancode remap, tablet-v2 engine), TASK-026 Phase 0 (metaState→XKB mods path, sticky-CTRL HUD latch).  
 **Fallback preserved:** the hardware-keyboard path (`MainActivity.dispatchKeyEvent` → `WaylandSurfaceView.onKeyDown` → `InputDispatcher`) must keep working unchanged when the AccessibilityService is not granted/enabled.
 
@@ -114,14 +114,14 @@ HyperOS's `PhoneWindowManager` intercepts system-level keys before they reach th
 | Criterion | Description | Status |
 |---|---|---|
 | **AC-01** | Task registered with architecture and AC table | **Done** |
-| **AC-02** | `AlwKeyInterceptService` intercepts Super / Alt+Tab / Esc **only** while the session surface is focused; `onKeyEvent` returns `false` outside the app (system behaviour untouched) | Planned |
-| **AC-03** | Auto-heal: after the one-time ADB grant, `onResume` enables the service automatically (Shizuku path) or shows the copyable ADB command; verified on the Xiaomi Pad 8 | Planned |
-| **AC-04** | Unit test asserts the complete keycode→evdev table (A–Z, 0–9, symbols, F1–F12, arrows, navigation, numpad, Ctrl/Alt/Super/Shift) | Planned |
+| **AC-02** | `AlwKeyInterceptService` intercepts Super / Alt+Tab / Esc **only** while the session surface is focused; `onKeyEvent` returns `false` outside the app (system behaviour untouched) | **Code Complete** — service + `SessionInputBus` gate landed (`WaylandSurfaceView.isSessionFocused` from surfaceCreated+window focus, cleared on surfaceDestroyed/session stop/focus loss); on-device capture check pending (§6 step 5) |
+| **AC-03** | Auto-heal: after the one-time ADB grant, `onResume` enables the service automatically (Shizuku path) or shows the copyable ADB command; verified on the Xiaomi Pad 8 | **Code Complete** — `AccessibilityHealer` (Shizuku → `WRITE_SECURE_SETTINGS` self-heal → copyable banner) wired into `MainActivity.onResume`; on-device grant/heal check pending |
+| **AC-04** | Unit test asserts the complete keycode→evdev table (A–Z, 0–9, symbols, F1–F12, arrows, navigation, numpad, Ctrl/Alt/Super/Shift) | **Done** — `EvdevKeyMap` + 4 table tests + 2 fallback dispatch tests in `InputDispatcherTest`; 211 workspace tests green |
 | **AC-05** | `nano`: Ctrl+X / Ctrl+C work; CachyOS SUPER binds (SUPER+Return/Q/M) fire from both the hardware and a11y paths | Planned |
 | **AC-06** | Right/middle click and scroll axes verified in-guest; `wl_touch`/`wl_pointer` separation unchanged | Planned |
 | **AC-07** | GAMING_RAW relative capture works; the cursor sprite never disappears over the wallpaper at high refresh | Planned |
 | **AC-08** | No double key delivery between `MainActivity.dispatchKeyEvent` and `WaylandSurfaceView.onKeyDown` (unit test + on-device log) | Planned |
-| **AC-09** | Unit tests + `./gradlew assembleDebug` green; evidence in `docs/tasks/TASK-027/evidence/`; commit pushed to `origin/main` | Planned |
+| **AC-09** | Unit tests + `./gradlew assembleDebug` green; evidence in `docs/tasks/TASK-027/evidence/`; commit pushed to `origin/main` | **Done** — 211 tests / 0 failures, `assembleDebug` green, [phase1-4-implementation.md](evidence/phase1-4-implementation.md) |
 
 ## 4. Verification Plan
 
@@ -145,3 +145,64 @@ HyperOS's `PhoneWindowManager` intercepts system-level keys before they reach th
   `false`; the service no-ops without the flag; verified in step 5.
 - **Double key delivery** (activity + view both dispatch) → `dispatchKeyEvent` consumes when
   handled; add the unit test before touching dispatch order.
+
+---
+
+## 6. Phases 1–4 implementation record (2026-11-19)
+
+Full record: [phase1-4-implementation.md](evidence/phase1-4-implementation.md). Build: 211 unit
+tests / 0 failures, `./gradlew test assembleDebug` green.
+
+**Phase 1 — session-scoped interception.** `SessionInputBus`
+(`bridge/wayland/.../input/SessionInputBus.kt`) is the single gate: `WaylandSurfaceView` publishes
+`isSessionFocused = surfaceActive && hasWindowFocus` from `surfaceCreated` / `onWindowFocusChanged`
+/ `surfaceDestroyed`, and registers its `InputDispatcher` as the process-wide key sink on
+`onAttachedToWindow` (unregistered on detach). `AlwKeyInterceptService`
+(`app/.../service/AlwKeyInterceptService.kt`, `AccessibilityService` +
+`flagRequestFilterKeyEvents` via `res/xml/alw_key_intercept_config.xml`) returns `false`
+immediately unless the bus reports focus, then forwards into `InputDispatcher.handleKeyEvent`
+(the hardware path) and consumes. `KEYCODE_BACK` maps to Esc (evdev 1) only through the focused
+path. `DashboardViewModel.stopSession()` additionally clears the bus flag, so session stop can
+never leave the interceptor latched.
+
+**Phase 2 — auto-heal.** `AccessibilityHealer` runs on every `MainActivity.onResume`, in order:
+(1) already enabled → no-op; (2) Shizuku companion `READY` → `settings put secure
+enabled_accessibility_services` + `accessibility_enabled 1` through the UID 2000 shell
+(`DefaultShizukuShellRunner`), re-verified afterwards; (3) app holds `WRITE_SECURE_SETTINGS`
+(one-time `adb shell pm grant` — manifest declares it) → writes `Settings.Secure` directly;
+(4) otherwise a dismissible Compose banner shows the one-time grant command with a Copy button
+that also carries the full manual `settings put` block. The merge logic
+(`parseEnabledServices` / `isOurServiceEntry` / `mergeServiceEntry`) is pure string handling —
+both stored spellings (`pkg/pkg.Cls`, `pkg/.Cls`) are recognised, pre-existing services are
+preserved byte-for-byte and never duplicated — and is unit-tested on the host JVM
+(`AccessibilityHealerTest`, no Robolectric dependency).
+
+**Phase 3 — complete evdev table.** `InputDispatcher.mapKeyCodeToScanCode` became
+`EvdevKeyMap.KEYCODE_TO_EVDEV` (`bridge/wayland/.../input/EvdevKeyMap.kt`), an explicit
+`Map<Int, Int>` covering the previous entries plus F1–F12 (59–68, 87, 88), MoveHome 102 /
+MoveEnd 107 / PgUp 104 / PgDn 109 / Insert 110, SysRq 99 / ScrollLock 70 / Pause 119, the full
+numpad block (0–9, dot, enter, +−×÷, NumLock 69), ISO 102nd 86 (`KEYCODE_POUND` — the UK-ISO
+102nd # key; hardware ISO keyboards still deliver scanCode 86 as ground truth) and Menu→Compose
+127. Hardware `scanCode > 0` still wins; the CapsLock→Super rebind is untouched. Tests:
+`InputDispatcherTest.testEvdevTableCovers*` + two end-to-end fallback dispatch tests.
+
+**Phase 4 — XKB `Mod4` sync & stuck-modifier hygiene.** New
+`WaylandServerManager.clearKeyboardModifiers()` → JNI `nativeClearKeyboardModifiers` →
+`WaylandSurfaceServer::clearKeyboardModifiers()` (`wayland_bridge.cpp`): zeroes
+`m_depressedModifiers` (Shift 0x1 / Ctrl 0x4 / Alt 0x8 / Super 0x40), preserves the CapsLock
+locked state, and re-broadcasts the change-deduped `wl_keyboard.modifiers`. Fired on every
+focus-loss transition in `WaylandSurfaceView.updateSessionFocus()` (which also releases
+GAMING_RAW pointer capture) and from `stopSession()`. Right-side modifiers were verified against
+Android's generic meta bits (either side sets the generic bit) — no split change needed.
+
+**Incidental lifecycle hygiene** (the "spawned-but-never-closed" audit from 2026-11-19):
+`DashboardViewModel.observeShizukuState` now collects on `sessionScope`; the audio
+`coordinateWith` collector is cancelled before relaunch; new `destroy()` cancels the scope from
+`MainActivity.onDestroy` (a running session is intentionally left alive for Activity
+recreations); `RiceHostBridge.sysfsLoop` sleeps in 250 ms slices so `stop()` joins promptly;
+native threads are named (`alw-wayland-event`, `alw-wayland-pacing`, `alw-audio-loop`) via
+`pthread_setname_np` so future `ps -T`/ANR traces are readable.
+
+**Outstanding for Phases 5–6 (on-device):** SUPER+Return/Q/M + Alt+Tab + Esc capture in the
+guest (`wev`), nano Ctrl+X/Ctrl+C, heal grant on the Pad 8, pointer/scroll/cursor + GAMING_RAW
+capture checks, and the no-swallow scope check (Home → Super must stay Android).

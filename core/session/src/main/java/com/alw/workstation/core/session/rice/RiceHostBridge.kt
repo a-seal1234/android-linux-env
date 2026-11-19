@@ -445,10 +445,16 @@ class RiceHostBridge(
             } catch (e: Throwable) {
                 Log.w(TAG, "sysfs refresh failed: ${e.message}")
             }
-            try {
-                Thread.sleep(sysfsRefreshMillis)
-            } catch (_: InterruptedException) {
-                return
+            // Sleep in slices so stop()'s join(500) unblocks promptly instead of
+            // waiting out the whole refresh interval on an uninterruptible sleep.
+            var waited = 0L
+            while (running.get() && waited < sysfsRefreshMillis) {
+                try {
+                    Thread.sleep(250)
+                    waited += 250
+                } catch (_: InterruptedException) {
+                    return
+                }
             }
         }
     }
