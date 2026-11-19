@@ -8,9 +8,9 @@
 **Planning workspace / branch / base:** `/media/DATA/project/android-linux-env` / `main`  
 **Write scope:** `bridge/wayland/`, `core/session/`, `core/proot/`, `app/`, `docs/tasks/TASK-026/`  
 **Risk:** High  
-**Status:** **In Progress** — Phase 0 (dynamic render scale, live FPS, metaState→XKB mods, EGL/GLES2-3 presenter behind `ALW_GLES_BLIT=1`, app-level Turnip+zink split) lands with the registration commit; Phases 1–5 pending.  
+**Status:** **In Progress** — Phase 0 landed (`ae60856` + nit fixes); **Phase 1 done and verified on-device** (GLES2/3 blit is now the default presentation path with automatic CPU fallback, live FPS pill deployed and reading `alw-host-query fps`); Phases 2–5 pending.  
 **Depends on:** TASK-024 (DMA-BUF bridge + Hyprland session), TASK-025 (host bridge socket, rice assets, pointer-latency work).  
-**Fallback preserved:** the LabWC Safe Mode profile (pixman / `wl_shm`) and the CPU `ANativeWindow_lock` blit path must remain fully functional at all times; the GLES presenter is opt-in until verified.
+**Fallback preserved:** the LabWC Safe Mode profile (pixman / `wl_shm`) and the CPU `ANativeWindow_lock` blit path remain fully functional at all times; the GLES presenter falls back automatically and can be forced off with `ALW_GLES_BLIT=0` / `debug.alw.gles_blit=0`.
 
 ---
 
@@ -23,8 +23,8 @@ Pad 8, but the pipeline is not yet a "100% GPU workstation":
 |---|---|---|
 | Compositor renderer | `kms_swrast` on the PRoot virtual DRM node (`renderD128`) — forcing zink there fails GBM EGL init (`gbm platform: eglInitialize failed`, verified on-device) | Compositor is CPU-rendered; apps are GPU-rendered (hybrid split) |
 | Guest apps | Turnip+zink via `alw-gui-run`/rice shims (verified `eglinfo`: `zink Vulkan 1.4(Adreno (TM) 825 (MESA_TURNIP))`) | Need zero-silent-llvmpipe verification + `eglinfo -p wayland` gate |
-| Host presentation | Scalar CPU swizzle loop in `blitBufferToWindow` at up to 3200×2136 per frame | GPU (EGL/GLES) texture blit on `ANativeWindow`; presenter exists behind `ALW_GLES_BLIT=1` but the composed frame does not reach the surface yet |
-| FPS visibility | None in-session | `nativeGetActualFps()` → `RiceHostBridge` `fps` command → live pill on the Sekai Pop bar/dock |
+| Host presentation | Scalar CPU swizzle loop in `blitBufferToWindow` at up to 3200×2136 per frame | **Fixed in Phase 1** — GPU EGL/GLES2-3 texture blit is the default, with automatic CPU fallback |
+| FPS visibility | None in-session | **Fixed in Phase 1** — `nativeGetActualFps()` → `RiceHostBridge` `fps` → live Quickshell pill (`AlwFpsShellGenerator` deploys it) |
 | Render scale | Fixed full resolution | Dynamic 0.35×–1.0× with live `wl_output.mode` / `xdg_toplevel.configure` re-broadcast (no compositor restart) |
 | Desktop UX | Android status/navigation bars consume space; HUD pill fixed; kitty opens bash | Immersive fullscreen (`WindowInsetsControllerCompat`), draggable/collapsible HUD, kitty+fish with CachyOS configs and fastfetch greeting |
 
@@ -45,9 +45,9 @@ Pad 8, but the pipeline is not yet a "100% GPU workstation":
                │ wl_shm / zwp_linux_dmabuf_v1 (SCM_RIGHTS)
 ┌──────────────▼──────────── Android host (wayland_bridge.cpp) ─────────────────┐
 │  import → cursor sprite cache → present:                                     │
-│    GPU path (opt-in ALW_GLES_BLIT=1): glTexSubImage2D + fullscreen quad +    │
-│      eglSwapBuffers on the ANativeWindow (Adreno 825), ES3 preferred         │
-│    CPU path (default): ANativeWindow_lock + scalar swizzle                   │
+│    GPU path (default): glTexSubImage2D + fullscreen quad + eglSwapBuffers on │
+│      the ANativeWindow (Adreno 825), ES3 preferred                           │
+│    CPU path (automatic fallback): ANativeWindow_lock + scalar swizzle        │
 │  pacing: Choreographer VSync → wl_callback.done at the live refresh rate (1x)│
 │  telemetry: m_blitCounter → m_actualFps (1 s window) → nativeGetActualFps    │
 │  dynamic output: m_renderScale (0.35–1.0) → ANativeWindow geometry +         │
@@ -87,25 +87,40 @@ Nit fixes before the commit:
 2. The `fakeroot` shim template's `else` branch lost its indentation when the zink env block
    was inserted (`core/proot/src/main/java/.../RiceShimGenerator.kt`).
 
-### Phase 1 — Host GLES2/3 blit + live FPS pill
-Diagnose the known on-device issue: the GLES presenter initializes on the Adreno 825 and swaps,
-but the composed frame does not reach the surface, so the CPU blit stays the default. Checklist
-in `bridge/wayland/src/main/cpp/wayland_bridge.cpp`:
-- (a) exactly one present path per frame (Phase 0 fix);
-- (b) destroy the EGL surface/context in `nativeDetachSurface` (currently only `setRenderScale`
-  tears it down → stale EGL surface after surface re-entry);
-- (c) verify EGL config format matches `ANativeWindow_setBuffersGeometry(..., RGBA_8888)` and
-  `holder.setFormat(PixelFormat.RGBA_8888)` in `WaylandSurfaceView`;
-- (d) verify no concurrent `ANativeWindow_lock` on the same window while EGL owns it;
-- (e) instrumentation: `eglQuerySurface` size log, optional 1-px `glReadPixels` probe,
-  `dumpsys SurfaceFlinger` capture into evidence.
+### Phase 1 — Host GLES2/3 blit + live FPS pill — **DONE (2026-11-19, verified on-device)**
 
-FPS exposure: `alw-host-query fps` already answers `fps=<n> res=<w>x<h> scale=<s> gpu=<id>`;
-render it as a Quickshell `alw-fps` pill **and** a Waybar `custom/alw-fps` module. Gap found
-during planning: `/root/.config/quickshell/alw-fps/shell.qml` is referenced by
-`ConfigSynthesizer` but **never deployed by any code** — add an `AlwFpsShellGenerator` beside
-`RiceShimGenerator` (`core/proot`) writing the QML into `/home/alw` and `/root` guest homes,
-non-destructively (existing-file check, same invariant as `ensureDefaultConfigsExist`).
+**Root cause** of "initializes and swaps but the frame never appears" was five defects in the
+presenter, all fixed in `bridge/wayland/src/main/cpp/wayland_bridge.cpp`:
+1. `setNativeWindow()` released the `ANativeWindow` without tearing down the presenter; the
+   `m_glReady` short-circuit then kept swapping into a dead BufferQueue.
+2. `resizeSurface()` called `ANativeWindow_setBuffersGeometry()` under a live `EGLSurface`,
+   invalidating its swapchain (it fires from `surfaceChanged` → `attachSurface`).
+3. `drawCursorOverlay()` and the CPU blit called `ANativeWindow_lock()` while EGL owned the
+   window.
+4. The fullscreen quad mapped the guest's top row to NDC `y = -1` → upside-down output.
+5. The upload used optional `GL_BGRA_EXT`; core `GL_RGBA` + a `.bgr` shader swizzle is correct for
+   little-endian ARGB/XRGB8888.
+
+**Presentation is now GPU by default** with a per-frame automatic CPU fallback;
+`ALW_GLES_BLIT=0` / `debug.alw.gles_blit=0` forces the CPU path for A/B testing. Instrumentation
+added: `EGL_NATIVE_VISUAL_ID` vs window-format check, `eglQuerySurface` size log, and a periodic
+`glReadPixels` probe sampled before `eglSwapBuffers`.
+
+**FPS pill:** `AlwFpsShellGenerator` (`core/proot/.../shim/`) deploys
+`~/.config/quickshell/alw-fps/shell.qml` (bundled resource) into every guest home,
+non-destructively, and is wired into `ProotRunner.buildLaunchCommand`. Unit tests cover resource
+loading, both-home deployment, the non-destructive invariant, custom homes and a missing rootfs.
+
+**Finding — the ~2 FPS ceiling is the guest compositor, not the host blit.** GPU (`GLES blit …
+fps 1.9–2.9`) and CPU (`ANativeWindow_lock`, `FPS 1.7–3.0`) paths measure the same rate; the CPU
+path never touches EGL. Hyprland is CPU-rendering on `kms_swrast` at 2400×1602 with blur. Raising
+it is Phase 3b (compositor-zink spike).
+
+Evidence: [phase1-verification.md](evidence/phase1-verification.md),
+[gpu_blit_hyprland_desktop.png](evidence/gpu_blit_hyprland_desktop.png),
+[cpu_fallback_hyprland_desktop.png](evidence/cpu_fallback_hyprland_desktop.png),
+[gles_presenter_gpu_path.log](evidence/gles_presenter_gpu_path.log),
+[cpu_fallback_path.log](evidence/cpu_fallback_path.log).
 
 ### Phase 2 — Dynamic render scale (0.35×–1.0×) polish
 Core landed in Phase 0. Remaining: persist the chosen scale (SharedPreferences, restored at
@@ -122,7 +137,8 @@ platform section. Add a session-time watchdog: scan the session log for `llvmpip
 strings in guest apps and surface a HUD warning when detected.
 
 ### Phase 3b — Compositor-zink spike (time-boxed, bail-out rule)
-Run **immediately after Phase 1 is verified working on the `kms_swrast` compositor**. Goal:
+Run **after Phase 1 is verified working on the `kms_swrast` compositor** (Phase 1 is done — the
+host blit is GPU by default and the desktop is visually verified). Goal:
 full end-to-end GPU rendering for Hyprland too. Maximum **2 focused attempts** behind the
 off-by-default profile toggle `gpu.forceCompositorZink`:
 1. **Attempt 1 — direct zink on the virtual node:** force
@@ -164,8 +180,8 @@ older rootfs → fall back to the bash launch; `SHELL` env already follows the p
 | Criterion | Description | Status |
 |---|---|---|
 | **AC-01** | Task registered with architecture, phases and AC table | **Done** |
-| **AC-02** | `ALW_GLES_BLIT=1` renders visibly on the Adreno 825 (screenshot); CPU blit default unchanged and functional; both paths counted in FPS | Planned |
-| **AC-03** | `alw-host-query fps` returns live `fps/res/scale/gpu`; FPS pill visible on the Sekai Pop bar/dock; value tracks the measured rate (±1) | Planned |
+| **AC-02** | GPU (EGL/GLES2-3) presentation on the Adreno 825 is the default path, verified visibly on-device; the CPU blit remains an automatic fallback and still renders (screenshots for both) | **Done** — `center=0xff513e3a` probe + [GPU](evidence/gpu_blit_hyprland_desktop.png) / [CPU](evidence/cpu_fallback_hyprland_desktop.png) screenshots |
+| **AC-03** | `alw-host-query fps` returns live `fps/res/scale/gpu`; FPS pill visible on the Sekai Pop bar/dock; value tracks the measured rate (±1) | **Done** — `fps=1 res=2400x1602 scale=0.75 gpu=zink-adreno825`; pill shows the same value |
 | **AC-04** | `alw-host-query scale set 0.5` (and the HUD cycler) resizes the Hyprland desktop live — `wl_output.mode` + `xdg_toplevel.configure` re-emitted, no compositor restart (screenshots at 0.5× and 1.0×) | Planned |
 | **AC-05** | `eglinfo -p wayland` in a guest app reports zink (Turnip Adreno (TM) 825); zero llvmpipe vendor strings in the session | Planned |
 | **AC-06** | Compositor-zink spike executed (max 2 attempts, right after Phase 1); outcome documented — enabled on clean boot, off-by-default with the hybrid split preserved on deep blockers; always revertible in one profile flip | Planned |
@@ -176,8 +192,8 @@ older rootfs → fall back to the bash launch; `SHELL` env already follows the p
 
 ## 5. Verification Plan
 
-1. Phase 1: `ALW_GLES_BLIT=1` session, screenshot vs CPU path, `dumpsys SurfaceFlinger`,
-   frame-cadence log.
+1. Phase 1 (**done**): GPU vs CPU screenshots, `glReadPixels` centre-pixel probe, frame-cadence
+   log, SurfaceFlinger layer listing — see `evidence/phase1-verification.md`.
 2. Phase 2/AC-04: `alw-host-query scale set 0.5` in a guest terminal + HUD cycler; screenshots
    at 0.5× and 1.0×; confirm Hyprland survived (no restart).
 3. Phase 3/AC-05: `pacman -S mesa-demos`; `eglinfo -p wayland` output into evidence; log scan

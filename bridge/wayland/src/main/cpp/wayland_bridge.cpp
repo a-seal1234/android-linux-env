@@ -16,6 +16,7 @@
 #endif
 #include <android/native_window_jni.h>
 #include <android/hardware_buffer.h>
+#include <sys/system_properties.h>
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -563,6 +564,11 @@ public:
 
     void setNativeWindow(ANativeWindow* window) {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        // An EGLSurface is bound to one ANativeWindow. Replacing or clearing the
+        // window while the presenter is live leaves it swapping into a dead buffer
+        // queue (the "initializes and swaps but nothing appears" symptom), so the
+        // presenter must be torn down before the window changes.
+        destroyGlPresenter();
         if (m_nativeWindow != nullptr) {
             ANativeWindow_release(m_nativeWindow);
             m_nativeWindow = nullptr;
@@ -585,6 +591,13 @@ public:
         m_width = width;
         m_height = height;
         if (m_nativeWindow != nullptr) {
+            // setBuffersGeometry() reallocates the BufferQueue behind a live
+            // EGLSurface, invalidating its swapchain; rebuild the presenter against
+            // the new geometry instead of presenting into the old buffers.
+            destroyGlPresenter();
+            m_windowShadow.clear();
+            m_shadowWidth = m_shadowHeight = m_shadowStride = 0;
+            m_cursorDrawnX = m_cursorDrawnY = -1;
             ANativeWindow_setBuffersGeometry(m_nativeWindow, scaledWidth(), scaledHeight(),
                                              WINDOW_FORMAT_RGBA_8888);
             LOGI("Surface resized to %dx%d (output %dx%d)", m_width, m_height,
@@ -674,6 +687,21 @@ public:
             return false;
         }
 
+        // The window is configured as WINDOW_FORMAT_RGBA_8888 (0x1). Presenting through
+        // a config with a different native visual makes eglSwapBuffers succeed while the
+        // consumer shows nothing, so prefer an exactly matching config when one exists.
+        {
+            EGLint windowFormat = 0;
+            if (ANativeWindow_getFormat(m_nativeWindow) == WINDOW_FORMAT_RGBA_8888)
+                windowFormat = 1; // HAL_PIXEL_FORMAT_RGBA_8888
+            EGLint visualId = 0;
+            const bool haveVisual =
+                eglGetConfigAttrib(m_eglDisplay, config, EGL_NATIVE_VISUAL_ID, &visualId) == EGL_TRUE;
+            LOGI("GLES: EGL config %p native visual 0x%x (window format 0x%x, match=%d)",
+                 static_cast<void*>(config), visualId, windowFormat,
+                 haveVisual && visualId == windowFormat ? 1 : 0);
+        }
+
         m_eglSurface = eglCreateWindowSurface(m_eglDisplay, config, m_nativeWindow, nullptr);
         if (m_eglSurface == EGL_NO_SURFACE) {
             LOGW("GLES: eglCreateWindowSurface failed (0x%x)", eglGetError());
@@ -701,11 +729,14 @@ public:
             "#version 300 es\n"
             "in vec2 aPos; in vec2 aTex; out vec2 vTex; uniform vec2 uScale;\n"
             "void main() { gl_Position = vec4(aPos * uScale, 0.0, 1.0); vTex = aTex; }\n";
+        // The guest buffers are little-endian ARGB/XRGB8888, i.e. bytes B,G,R,A, and
+        // are uploaded verbatim as GL_RGBA. Swizzling .bgr here keeps the upload on
+        // core GLES formats (GL_BGRA_EXT is an optional extension) and yields RGB.
         static const char* kFragmentEs3 =
             "#version 300 es\n"
             "precision mediump float; in vec2 vTex; out vec4 fragColor;\n"
             "uniform sampler2D uTex;\n"
-            "void main() { fragColor = vec4(texture(uTex, vTex).rgb, 1.0); }\n";
+            "void main() { fragColor = vec4(texture(uTex, vTex).bgr, 1.0); }\n";
         static const char* kVertexEs2 =
             "attribute vec2 aPos;\n"
             "attribute vec2 aTex;\n"
@@ -716,7 +747,7 @@ public:
             "precision mediump float;\n"
             "varying vec2 vTex;\n"
             "uniform sampler2D uTex;\n"
-            "void main() { gl_FragColor = vec4(texture2D(uTex, vTex).rgb, 1.0); }\n";
+            "void main() { gl_FragColor = vec4(texture2D(uTex, vTex).bgr, 1.0); }\n";
 
         GLuint vs = compileShader(GL_VERTEX_SHADER, m_glEs3 ? kVertexEs3 : kVertexEs2);
         GLuint fs = compileShader(GL_FRAGMENT_SHADER, m_glEs3 ? kFragmentEs3 : kFragmentEs2);
@@ -746,11 +777,13 @@ public:
         m_glScaleUniform = glGetUniformLocation(m_glProgram, "uScale");
 
         // Static fullscreen quad: (x, y, u, v). ES3 forbids client-side arrays.
+        // The upload starts at the guest's top row (v = 0), while NDC y = +1 is the
+        // top of the window, so v is inverted relative to y or the frame is upside down.
         static const GLfloat kQuad[] = {
-            -1.0f, -1.0f, 0.0f, 0.0f,
-             1.0f, -1.0f, 1.0f, 0.0f,
-            -1.0f,  1.0f, 0.0f, 1.0f,
-             1.0f,  1.0f, 1.0f, 1.0f
+            -1.0f, -1.0f, 0.0f, 1.0f,
+             1.0f, -1.0f, 1.0f, 1.0f,
+            -1.0f,  1.0f, 0.0f, 0.0f,
+             1.0f,  1.0f, 1.0f, 0.0f
         };
         glGenBuffers(1, &m_glVbo);
         glBindBuffer(GL_ARRAY_BUFFER, m_glVbo);
@@ -803,8 +836,9 @@ public:
 
         glBindTexture(GL_TEXTURE_2D, m_glTexture);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-        const GLenum uploadFormat = (format == 0 || format == 1) ? GL_BGRA_EXT : GL_RGBA;
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, uploadFormat,
+        // Both ARGB8888 and XRGB8888 guest buffers are B,G,R,A byte order in memory;
+        // GL_RGBA keeps the upload on a core format and the fragment shader swizzles.
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA,
                         GL_UNSIGNED_BYTE, src);
 
         EGLint surfaceWidth = 0, surfaceHeight = 0;
@@ -848,6 +882,21 @@ public:
         if (m_glTexAttr >= 0) glDisableVertexAttribArray(m_glTexAttr);
 
         (void) scaleZ;
+        // Diagnostics: confirm the frame we are about to present is not uniformly black
+        // and that the surface size matches what we render into (Phase 1 evidence).
+        // Sampled before eglSwapBuffers, while the drawn buffer is still the back buffer.
+        static int s_probeCount = 0;
+        if (++s_probeCount % 300 == 1) {
+            EGLint probeW = 0, probeH = 0;
+            eglQuerySurface(m_eglDisplay, m_eglSurface, EGL_WIDTH, &probeW);
+            eglQuerySurface(m_eglDisplay, m_eglSurface, EGL_HEIGHT, &probeH);
+            uint32_t pixel = 0;
+            glReadPixels(surfaceWidth / 2, surfaceHeight / 2, 1, 1, GL_RGBA,
+                         GL_UNSIGNED_BYTE, &pixel);
+            LOGI("GLES probe: surface=%dx%d reported=%dx%d center=0x%08x",
+                 surfaceWidth, surfaceHeight, probeW, probeH, pixel);
+        }
+
         const EGLBoolean swapped = eglSwapBuffers(m_eglDisplay, m_eglSurface);
         m_glVideo[0] = swapped == EGL_TRUE;
         if (swapped != EGL_TRUE) {
@@ -990,6 +1039,11 @@ public:
     void drawCursorOverlay() {
         if (m_nativeWindow == nullptr || !m_cursorImage.valid() || m_windowShadow.empty())
             return;
+        // While the EGL presenter owns this window, ANativeWindow_lock() would fight its
+        // swapchain (stale contents, dropped frames, or a wedged queue). The EGL path
+        // repaints a full frame every vsync anyway, so the overlay is skipped there.
+        if (m_glReady)
+            return;
 
         ANativeWindow_Buffer outBuffer;
         if (ANativeWindow_lock(m_nativeWindow, &outBuffer, nullptr) != 0)
@@ -1107,13 +1161,16 @@ public:
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         if (m_nativeWindow == nullptr || src == nullptr) return;
 
-        // The EGL/GLES2 presenter is opt-in: on the Xiaomi Pad 8 it initializes on the
-        // Adreno 825 and swaps, but the composed frame does not reach the surface yet,
-        // so the CPU blit stays the default until that is resolved. presentWithGl() must
-        // run exactly once per frame (the previous two-block structure double-presented).
+        // GPU presentation is the default; the CPU blit remains an automatic fallback
+        // when EGL cannot initialize (or fails to swap). Set ALW_GLES_BLIT=0, or the
+        // debug.alw.gles_blit system property to 0, to force the CPU path on-device.
         static const bool s_glesPresenterEnabled = []() {
             const char* value = getenv("ALW_GLES_BLIT");
-            return value != nullptr && value[0] == '1';
+            if (value != nullptr && value[0] == '0') return false;
+            char prop[PROP_VALUE_MAX] = {0};
+            if (__system_property_get("debug.alw.gles_blit", prop) > 0 && prop[0] == '0')
+                return false;
+            return true;
         }();
         if (s_glesPresenterEnabled) {
             if (presentWithGl(src, srcWidth, srcHeight, srcStride, format)) {
@@ -1125,9 +1182,20 @@ public:
                 }
                 return;
             }
-            static int s_glDropLog = 0;
-            if (++s_glDropLog % 60 == 1)
-                LOGW("GLES: presenter unavailable or swap failed; using CPU blit");
+            // Fall through to the CPU path. The presenter retries on the next frame
+            // unless EGL initialization itself failed, which is latched by m_glTried.
+            static int s_cpuFallbackLog = 0;
+            if (++s_cpuFallbackLog % 120 == 1)
+                LOGW("GLES: presenter unavailable; CPU blit fallback");
+        }
+
+        // ANativeWindow_lock() must never race the EGL swapchain. If the presenter owns
+        // the window but this frame could not be presented, drop it rather than lock.
+        if (m_glReady) {
+            static int s_glSkipLog = 0;
+            if (++s_glSkipLog % 120 == 1)
+                LOGW("GLES: frame dropped (presenter owns the window)");
+            return;
         }
 
         ANativeWindow_Buffer outBuffer;
@@ -1420,8 +1488,6 @@ public:
         else if (scanCode == 56 || scanCode == 100) modBit = (1 << 3); // Alt
         else if (scanCode == 125 || scanCode == 126) modBit = (1 << 6);// Super / Meta
 
-        const uint32_t trackedModifiers = m_depressedModifiers;
-
         if (modBit != 0) {
             if (scanCode == 58) {
                 if (isDown) m_lockedModifiers ^= modBit;
@@ -1431,12 +1497,13 @@ public:
             }
         }
 
-        // Android reports the effective modifier state (physical Ctrl/Shift/Alt held
-        // while a letter is typed). Merge it with the explicitly tracked modifier
-        // keys so Ctrl+C, nano's Ctrl+X/Ctrl+O, etc. arrive with the right mask.
-        m_depressedModifiers = (m_depressedModifiers & modBit != 0 ? m_depressedModifiers : trackedModifiers) |
-                               modsFromMetaState(metaState);
-        if (modBit != 0 && isDown) m_depressedModifiers |= modBit;
+        // Android reports the effective modifier state for every key event, which
+        // recovers Ctrl+C / nano Ctrl+X when HyperOS swallows the modifier's own
+        // event. It is only merged for non-modifier keys: a modifier's ACTION_UP
+        // still carries its own bit in metaState, so trusting it there would leave
+        // the modifier stuck down. Modifier keys follow the tracked state exactly.
+        if (modBit == 0)
+            m_depressedModifiers |= modsFromMetaState(metaState);
 
         uint32_t now = nowMillis();
         uint32_t keySerial = nextSerial();

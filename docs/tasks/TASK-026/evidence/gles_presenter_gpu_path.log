@@ -1,0 +1,20 @@
+=== TASK-026 Phase 1 — GLES presenter on Xiaomi Pad 8 (192.168.51.161:44021) ===
+captured: 2026-11-19T13:34:32Z  app pid=13572
+
+--- EGL config / presenter init ---
+
+--- frame cadence (GPU path) ---
+11-19 20:32:05.454 13572 14663 I ALW::WaylandBridgeNative: GLES blit #361: 2400x1602 (scale 0.75, fps 1.9)
+11-19 20:32:35.141 13572 14663 I ALW::WaylandBridgeNative: GLES blit #421: 2400x1602 (scale 0.75, fps 1.9)
+11-19 20:33:04.782 13572 14663 I ALW::WaylandBridgeNative: GLES blit #481: 2400x1602 (scale 0.75, fps 1.9)
+11-19 20:33:33.962 13572 14663 I ALW::WaylandBridgeNative: GLES blit #541: 2400x1602 (scale 0.75, fps 1.9)
+11-19 20:34:01.814 13572 14663 I ALW::WaylandBridgeNative: GLES probe: surface=2400x1602 reported=2400x1602 center=0xff513e3a
+11-19 20:34:01.815 13572 14663 I ALW::WaylandBridgeNative: GLES blit #601: 2400x1602 (scale 0.75, fps 2.9)
+11-19 20:34:32.004 13572 14663 I ALW::WaylandBridgeNative: GLES blit #661: 2400x1602 (scale 0.75, fps 1.9)
+
+--- presenter init (this pid) ---
+
+--- SurfaceFlinger: SurfaceView layer present ---
+RequestedLayerState{d3717ce SurfaceView[com.alw.workstation/com.alw.workstation.MainActivity](BLAST)#66887 parentId=66886}
+RequestedLayerState{d3717ce SurfaceView[com.alw.workstation/com.alw.workstation.MainActivity]#66886 parentId=66885 relativeParentId=66879 z=1}
+RequestedLayerState{Background for d3717ce SurfaceView[com.alw.workstation/com.alw.workstation.MainActivity]#66888 parentId=66886 relativeParentId=66879 z=-2147483648}

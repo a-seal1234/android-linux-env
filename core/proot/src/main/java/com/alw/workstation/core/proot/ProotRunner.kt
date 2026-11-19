@@ -115,6 +115,14 @@ class ProotRunner(
         val guestLocalBin = File(rootfsDir, "usr/local/bin")
         com.alw.workstation.core.proot.shim.RiceShimGenerator.installShims(guestLocalBin)
 
+        // Deploy the Quickshell FPS pill (TASK-026). ConfigSynthesizer autostarts
+        // `qs -c alw-fps`, so the shell must exist in both guest homes after a fresh
+        // provisioning (non-destructive: existing files are left alone).
+        com.alw.workstation.core.proot.shim.AlwFpsShellGenerator.deploy(
+            rootfsDir,
+            listOf("home/${profile.distro.defaultUser}", "root")
+        )
+
         // 5. Direct Adreno KGSL hardware GPU device node & Fallback check
         val isKgslAccessible = kgslNodeChecker(profile.gpu.kgslNode)
         val requiresKgsl = profile.gpu.driverMode != StackProfile.DriverMode.LLVMPIPE

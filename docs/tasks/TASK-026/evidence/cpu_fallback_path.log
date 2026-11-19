@@ -1,0 +1,16 @@
+=== CPU blit fallback (debug.alw.gles_blit=0) — Xiaomi Pad 8 ===
+captured: 2026-11-19T13:36:37Z  app pid=21626
+
+--- no GLES presenter: CPU ANativeWindow_lock path only ---
+11-19 20:36:24.652 21626 22790 I ALW::WaylandBridgeNative: Blitted frame #1: 2400x1602 (stride=9728, fmt=1) -> ANativeWindow 2400x1602 (stride=2432)
+11-19 20:36:24.927 21626 22790 I ALW::WaylandBridgeNative: 144Hz Frame Pacing: 1 frames (total 1) in 4306.7 ms | FPS: 0.2 | Frame Time: avg=4306.69 ms, min=4306.69 ms, max=4306.69 ms
+11-19 20:36:26.752 21626 22790 I ALW::WaylandBridgeNative: 144Hz Frame Pacing: 2 frames (total 3) in 1824.8 ms | FPS: 1.1 | Frame Time: avg=912.40 ms, min=23.83 ms, max=1800.98 ms
+11-19 20:36:27.787 21626 22790 I ALW::WaylandBridgeNative: 144Hz Frame Pacing: 5 frames (total 8) in 1035.3 ms | FPS: 4.8 | Frame Time: avg=207.07 ms, min=23.85 ms, max=672.32 ms
+11-19 20:36:29.297 21626 22790 I ALW::WaylandBridgeNative: 144Hz Frame Pacing: 3 frames (total 11) in 1509.8 ms | FPS: 2.0 | Frame Time: avg=503.28 ms, min=226.56 ms, max=945.39 ms
+11-19 20:36:30.929 21626 22790 I ALW::WaylandBridgeNative: 144Hz Frame Pacing: 3 frames (total 14) in 1631.5 ms | FPS: 1.8 | Frame Time: avg=543.83 ms, min=399.76 ms, max=656.58 ms
+11-19 20:36:32.124 21626 22790 I ALW::WaylandBridgeNative: 144Hz Frame Pacing: 2 frames (total 16) in 1195.3 ms | FPS: 1.7 | Frame Time: avg=597.66 ms, min=430.40 ms, max=764.93 ms
+11-19 20:36:33.132 21626 22790 I ALW::WaylandBridgeNative: 144Hz Frame Pacing: 3 frames (total 19) in 1008.3 ms | FPS: 3.0 | Frame Time: avg=336.11 ms, min=302.65 ms, max=370.76 ms
+11-19 20:36:34.149 21626 22790 I ALW::WaylandBridgeNative: 144Hz Frame Pacing: 2 frames (total 21) in 1016.5 ms | FPS: 2.0 | Frame Time: avg=508.26 ms, min=498.64 ms, max=517.88 ms
+11-19 20:36:35.233 21626 22790 I ALW::WaylandBridgeNative: 144Hz Frame Pacing: 2 frames (total 23) in 1084.1 ms | FPS: 1.8 | Frame Time: avg=542.04 ms, min=526.31 ms, max=557.76 ms
+11-19 20:36:36.303 21626 22790 I ALW::WaylandBridgeNative: 144Hz Frame Pacing: 2 frames (total 25) in 1070.2 ms | FPS: 1.9 | Frame Time: avg=535.10 ms, min=467.63 ms, max=602.58 ms
+11-19 20:36:37.588 21626 22790 I ALW::WaylandBridgeNative: 144Hz Frame Pacing: 3 frames (total 28) in 1284.9 ms | FPS: 2.3 | Frame Time: avg=428.31 ms, min=403.36 ms, max=455.19 ms
