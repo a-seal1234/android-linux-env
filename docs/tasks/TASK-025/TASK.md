@@ -245,6 +245,78 @@ by ALW.
 | **AC-19** | Quickshell installed and the Sekai Pop shell/dock runs | **Done** — bar, dock, clock widget and welcome tour render |
 | **AC-20** | Kitty is the default terminal, themed with the Sekai Pop palette | **Done** |
 
+## 4d. GPU path, FPS/scale telemetry and Ctrl passthrough
+
+**Turnip / Zink**
+
+- The Turnip ICD at `/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json` is exported
+  for the whole session. Verified in the guest:
+  `vulkaninfo` → `deviceName = Adreno (TM) 825`, `driverName = turnip Mesa driver`;
+  `eglinfo -B` → `OpenGL renderer: zink Vulkan 1.4(Adreno (TM) 825 (MESA_TURNIP))`,
+  `OpenGL 4.6 (Core Profile) Mesa 27.0.0`.
+- **The compositor cannot run on zink here.** With
+  `MESA_LOADER_DRIVER_OVERRIDE=zink` Hyprland never produces a frame
+  (`GBM platform: eglInitialize failed`, zero blits at the bridge, black screen).
+  The session therefore keeps `kms_swrast` for the compositor and
+  `alw-gui-run` exports Turnip + Zink (`MESA_LOADER_DRIVER_OVERRIDE=zink`,
+  `GALLIUM_DRIVER=zink`, `LIBGL_ALWAYS_SOFTWARE=0`, `TU_DEBUG=noconform`,
+  `MESA_VK_WSI_PRESENT_MODE=immediate`) for every guest application.
+- `android_dri.c` already reports `DRM_CAP_PRIME=3`, an explicit
+  `DRM_CAP_SYNCOBJ=0`, and `-ENOTTY` for unknown DRM/MSM ioctls.
+
+**Presentation pipeline**
+
+- `blitBufferToWindow` now has an EGL/GLES3 presenter (Adreno 825, textured
+  fullscreen quad, `GL_BGRA_EXT` upload, `GL_EXT_unpack_subimage`-equivalent
+  padded-stride support via ES3 `GL_UNPACK_ROW_LENGTH`). It initializes and swaps
+  successfully (`GLES blit #1: 2400x1602`), but the composed frame does not reach
+  the SurfaceView yet, so it is **opt-in** (`ALW_GLES_BLIT=1`) and the CPU blit
+  remains the default. `ANativeWindow_lock` is never mixed with an EGL-owned
+  window; a failed swap drops the frame instead of corrupting the window.
+
+**Live FPS**
+
+- The bridge counts completed blits and samples them once per second
+  (`m_actualFps`), exposed as `nativeGetActualFps()` and through the host socket:
+  `alw-host-query fps` → `fps=3 res=2400x1602 scale=0.75 gpu=zink-adreno825`.
+- A dedicated Quickshell pill (`qs -c alw-fps`) polls it every second and renders
+  `󰓅 <N> FPS <scale>x` in the bottom-right overlay
+  (`assets/quickshell-alw-fps/shell.qml`). Idle numbers are damage-driven: with a
+  static desktop and a software compositor only 1-5 blits/s occur.
+
+**Dynamic render scale**
+
+- `renderScale` (default **0.75**, clamped 0.35-1.0) is applied atomically; the
+  window geometry becomes `align2(width*scale) x align2(height*scale)` and every
+  client receives an updated `wl_output.mode`, `xdg_toplevel.configure` and
+  `xdg_surface.configure`, so Hyprland resizes without restarting.
+  Verified live: `Render scale 0.85 -> output 2720x1816`, then back to
+  `0.75 -> 2400x1602` ([render_scale.log](evidence/render_scale.log)).
+- Host commands: `scale get` / `scale set <0.35-1.0>`; Android HUD cycler pill
+  (`0.50x → 0.75x → 0.85x → 1.00x`).
+- Caveat: Hyprland validates the monitor scale on every mode change; rapid
+  repeated changes log `Invalid scale passed to monitor WAYLAND-1: 1.75`, so the
+  desktop can need a reload after several consecutive switches.
+
+**Ctrl passthrough**
+
+- `InputDispatcher` forwards `KeyEvent.metaState`; the bridge merges it with the
+  tracked modifier keys and only emits `wl_keyboard.modifiers` when the mask
+  changes (`META_SHIFT_ON`, `META_CTRL_ON`, `META_ALT_ON`, `META_META_ON`).
+  `KEYCODE_CTRL_LEFT/RIGHT` map to evdev 29/97.
+- Verified on-device: typing in Kitty then `KEYCODE_CTRL_LEFT + X` / `+ C` produces
+  `^X^C` in the shell ([ctrl_passthrough_cat_v.png](evidence/ctrl_passthrough_cat_v.png)).
+- Android HUD gained a sticky **CTRL** pill (injects KEY_LEFTCTRL + `META_CTRL_ON`)
+  next to the render-scale pill.
+
+| AC | Criterion | Status |
+|----|-----------|--------|
+| **AC-21** | Turnip/Zink verified; apps render on the Adreno 825 | **Done** — `vulkaninfo`/`eglinfo` on-device; `alw-gui-run` exports the Zink path |
+| **AC-22** | GPU presentation path (EGL/GLES on ANativeWindow) | **Implemented, opt-in** — initializes/swaps on Adreno 825; frame content not yet on screen, so CPU blit stays default |
+| **AC-23** | Live FPS counter + `fps` host command + Quickshell pill | **Done** — pill polls every second |
+| **AC-24** | Dynamic render scale 0.35-1.0 with live reconfigure + HUD cycler + `scale` command | **Done** — verified 0.85 → 2720x1816 → 0.75 → 2400x1602 |
+| **AC-25** | Ctrl passthrough for terminals (physical + touch pill) | **Done** — `^X^C` verified |
+
 ## 5. On-device evidence (Xiaomi Pad 8, `d370854b`)
 
 ```

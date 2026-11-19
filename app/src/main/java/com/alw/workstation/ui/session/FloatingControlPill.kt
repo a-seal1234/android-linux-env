@@ -47,6 +47,26 @@ import com.alw.workstation.bridge.wayland.audio.AudioStatus
 import com.alw.workstation.bridge.wayland.input.InputProfile
 import com.alw.workstation.core.session.SessionState
 
+/** Compact, touch-friendly HUD button (render-scale cycler, sticky CTRL). */
+@Composable
+private fun HudPill(label: String, active: Boolean, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick),
+        color = if (active) Color(0xFF00E676) else Color(0x33FFFFFF)
+    ) {
+        Text(
+            text = label,
+            color = if (active) Color.Black else Color.White,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        )
+    }
+}
+
 @Composable
 fun FloatingControlPill(
     inputProfile: InputProfile,
@@ -58,6 +78,10 @@ fun FloatingControlPill(
     onReloadHyprland: (() -> Unit)? = null,
     onRegenerateDotfiles: (() -> Unit)? = null,
     onToggleSafeMode: (() -> Unit)? = null,
+    renderScale: Float = 0.75f,
+    onCycleRenderScale: (() -> Unit)? = null,
+    ctrlLatched: Boolean = false,
+    onToggleCtrl: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var isExpanded by remember { mutableStateOf(false) }
@@ -119,6 +143,20 @@ fun FloatingControlPill(
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp
                     )
+                    onCycleRenderScale?.let { cycle ->
+                        HudPill(
+                            label = "${String.format("%.2f", renderScale)}x",
+                            active = false,
+                            onClick = cycle
+                        )
+                    }
+                    onToggleCtrl?.let { toggle ->
+                        HudPill(
+                            label = "CTRL",
+                            active = ctrlLatched,
+                            onClick = toggle
+                        )
+                    }
                 }
             }
         } else {

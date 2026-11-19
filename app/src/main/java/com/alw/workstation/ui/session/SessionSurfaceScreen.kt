@@ -5,6 +5,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -51,6 +56,10 @@ fun SessionSurfaceScreen(
             }
         )
 
+        var renderScaleIndex by remember { mutableIntStateOf(1) }
+        var ctrlLatched by remember { mutableStateOf(false) }
+        val renderScales = remember { listOf(0.5f, 0.75f, 0.85f, 1.0f) }
+
         // Collapsible Floating Control Pill Overlay (hosted in Popup to float above SurfaceView)
         Popup(
             alignment = Alignment.TopEnd,
@@ -78,6 +87,17 @@ fun SessionSurfaceScreen(
                 onStopSession = {
                     dashboardViewModel.stopSession()
                     onStopSession()
+                },
+                renderScale = renderScales[renderScaleIndex],
+                onCycleRenderScale = {
+                    renderScaleIndex = (renderScaleIndex + 1) % renderScales.size
+                    serverManager.setRenderScale(renderScales[renderScaleIndex])
+                },
+                ctrlLatched = ctrlLatched,
+                onToggleCtrl = {
+                    ctrlLatched = !ctrlLatched
+                    // KEY_LEFTCTRL (29) with META_CTRL_ON when latched.
+                    serverManager.sendKey(29, ctrlLatched, if (ctrlLatched) 0x1000 else 0)
                 },
                 modifier = Modifier.padding(16.dp)
             )

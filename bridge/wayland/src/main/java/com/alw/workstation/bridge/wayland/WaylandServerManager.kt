@@ -84,6 +84,9 @@ class WaylandServerManager {
     private external fun nativeSetSurface(surface: Surface?)
     private external fun nativeResizeSurface(width: Int, height: Int)
     private external fun nativeSetRefreshRate(hz: Float)
+    private external fun nativeSetRenderScale(scale: Float)
+    private external fun nativeGetRenderScale(): Float
+    private external fun nativeGetActualFps(): Float
     private external fun nativeIsRunning(): Boolean
     private external fun nativeGetActiveClients(): Int
     private external fun nativeIsTabletV2Supported(): Boolean
@@ -108,7 +111,7 @@ class WaylandServerManager {
     private external fun nativeSendPointerAbsolute(x: Float, y: Float)
     private external fun nativeSendPointerButton(buttonCode: Int, isDown: Boolean)
     private external fun nativeSendPointerAxis(axis: Int, value: Float)
-    private external fun nativeSendKeyEvent(scanCode: Int, isDown: Boolean)
+    private external fun nativeSendKeyEvent(scanCode: Int, isDown: Boolean, metaState: Int)
     private external fun nativeSendTouchEvent(action: Int, touchId: Int, x: Float, y: Float)
     private external fun nativeStopServer()
 
@@ -170,6 +173,8 @@ class WaylandServerManager {
     fun resizeSurface(width: Int, height: Int) {
         mockWidth = width
         mockHeight = height
+        outputWidth = width
+        outputHeight = height
         if (isNativeLoaded) {
             nativeResizeSurface(width, height)
         }
@@ -179,6 +184,34 @@ class WaylandServerManager {
      * Forwards the host display's current refresh rate so the native bridge paces
      * wl_callback.done at the live VSync cadence (60-144 Hz) and reports it in wl_output.
      */
+    /** Measured completed frame blits per second (GPU presenter or CPU fallback). */
+    var actualFps: Float = 0f
+        private set
+
+    /** Dynamic render scale applied to the guest output (0.35 .. 1.0). */
+    var renderScale: Float = 0.75f
+        private set
+
+    /** Last surface size reported by the host view. */
+    var outputWidth: Int = 3200
+        private set
+    var outputHeight: Int = 2136
+        private set
+
+    fun setRenderScale(scale: Float) {
+        val clamped = scale.coerceIn(0.35f, 1.0f)
+        renderScale = clamped
+        if (isNativeLoaded) {
+            nativeSetRenderScale(clamped)
+        }
+    }
+
+    fun refreshGraphicsStats() {
+        if (!isNativeLoaded) return
+        actualFps = nativeGetActualFps()
+        renderScale = nativeGetRenderScale()
+    }
+
     fun setRefreshRate(hz: Float) {
         mockRefreshRateHz = if (hz > 0f) hz else 60f
         if (isNativeLoaded) {
@@ -310,9 +343,9 @@ class WaylandServerManager {
         }
     }
 
-    fun sendKey(scanCode: Int, isDown: Boolean) {
+    fun sendKey(scanCode: Int, isDown: Boolean, metaState: Int = 0) {
         if (isNativeLoaded) {
-            nativeSendKeyEvent(scanCode, isDown)
+            nativeSendKeyEvent(scanCode, isDown, metaState)
         } else {
             mockKeyEvents.add(MockKeyRecord(scanCode, isDown))
         }

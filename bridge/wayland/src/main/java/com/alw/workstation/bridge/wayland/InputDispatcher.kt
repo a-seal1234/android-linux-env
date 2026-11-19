@@ -198,7 +198,9 @@ class InputDispatcher(
 
         if (scanCode > 0) {
             val isDown = event.action == KeyEvent.ACTION_DOWN
-            serverManager.sendKey(scanCode, isDown)
+            // Forward Android's effective modifier mask so Ctrl+C / Ctrl+X reach the
+            // guest with the correct XKB mods even when only the letter is delivered.
+            serverManager.sendKey(scanCode, isDown, event.metaState)
             return true
         }
         return false

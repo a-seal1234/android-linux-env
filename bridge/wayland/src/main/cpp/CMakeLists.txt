@@ -24,9 +24,21 @@ find_library(
     aaudio
 )
 
+find_library(
+    egl-lib
+    EGL
+)
+
+find_library(
+    gles-lib
+    GLESv2
+)
+
 target_link_libraries(
     wayland_bridge
     ${android-lib}
     ${log-lib}
     ${aaudio-lib}
+    ${egl-lib}
+    ${gles-lib}
 )

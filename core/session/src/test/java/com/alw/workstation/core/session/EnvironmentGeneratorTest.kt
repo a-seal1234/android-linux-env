@@ -33,14 +33,16 @@ class EnvironmentGeneratorTest {
         assertEquals("/home/alw/.cache/pnpm-store", env["PNPM_STORE_DIR"])
         assertEquals("/home/alw/.cache/go-build", env["GOCACHE"])
 
-        // Turnip KGSL variables
-        assertEquals("/opt/drivers/turnip/active/freedreno_icd.aarch64.json", env["VK_ICD_FILENAMES"])
-        assertEquals("/opt/drivers/turnip/active/freedreno_icd.aarch64.json", env["VK_DRIVER_FILES"])
+        // Turnip ICD exported for the whole session (verified on-device: Adreno 825)
+        assertEquals("/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json", env["VK_ICD_FILENAMES"])
+        assertEquals("/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json", env["VK_DRIVER_FILES"])
+        assertEquals("noconform", env["TU_DEBUG"])
+        assertEquals("immediate", env["MESA_VK_WSI_PRESENT_MODE"])
+        assertEquals("0", env["LIBGL_ALWAYS_SOFTWARE"])
+        // The compositor keeps kms_swrast: zink fails GBM EGL init on the virtual node.
+        // Applications get Turnip+Zink from the alw-gui-run shim instead.
         assertEquals("kms_swrast", env["MESA_LOADER_DRIVER_OVERRIDE"])
         assertNull(env["GALLIUM_DRIVER"])
-        assertEquals("noconform", env["TU_DEBUG"])
-        assertEquals("4.6", env["MESA_GL_VERSION_OVERRIDE"])
-        assertEquals("0", env["LIBGL_ALWAYS_SOFTWARE"])
 
         // Hyprland nested-backend requirements (no logind/seatd, no DRM cursor plane)
         assertEquals("noop", env["LIBSEAT_BACKEND"])

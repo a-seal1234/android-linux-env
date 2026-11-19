@@ -96,6 +96,8 @@ object ConfigSynthesizer {
             appendLine("    hl.exec_cmd(\"sh -c 'W=/home/alw/.config/hypr/assets/sekaipop-wallpaper.png; if command -v hyprpaper >/dev/null 2>&1; then alw-gui-run hyprpaper >/tmp/rt/hyprpaper.log 2>&1 & elif command -v swww >/dev/null 2>&1; then alw-gui-run swww-daemon >/dev/null 2>&1 & sleep 1; alw-gui-run swww img \$W >/dev/null 2>&1; elif command -v swaybg >/dev/null 2>&1; then alw-gui-run swaybg -i \$W -m fill >/tmp/rt/swaybg.log 2>&1 & fi'\")")
             appendLine("    -- Sekai Pop native shell (Quickshell) with Waybar fallback.")
             appendLine("    hl.exec_cmd(\"sh -c 'Q=/root/.config/quickshell/sekaipop; B=/home/alw/.config/waybar/sekaipop; if command -v qs >/dev/null 2>&1 && [ -d \$Q ]; then alw-gui-run qs -c sekaipop >/tmp/rt/quickshell.log 2>&1 & elif command -v waybar >/dev/null 2>&1 && [ -f \$B/config.jsonc ]; then alw-gui-run waybar -c \$B/config.jsonc -s \$B/style.css >/tmp/rt/waybar.log 2>&1 & fi'\")")
+            appendLine("    -- Live FPS / render-scale pill from the ALW host bridge.")
+            appendLine("    hl.exec_cmd(\"sh -c 'F=/root/.config/quickshell/alw-fps; if command -v qs >/dev/null 2>&1 && [ -f \$F/shell.qml ]; then alw-gui-run qs -c alw-fps >/tmp/rt/quickshell-fps.log 2>&1 & fi'\")")
             appendLine("    -- Optional post-start hook (TASK-025): runs only if present.")
             appendLine("    hl.exec_cmd(\"sh -c 'test -x /root/alw-session-hook.sh && /root/alw-session-hook.sh > /tmp/rt/alw-session-hook.log 2>&1'\")")
             appendLine("end)")

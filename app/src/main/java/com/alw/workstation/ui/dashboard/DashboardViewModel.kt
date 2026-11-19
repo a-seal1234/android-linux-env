@@ -242,7 +242,26 @@ class DashboardViewModel(
             context = context,
             socketFile = File(runtimeDir, RiceHostBridge.SOCKET_NAME),
             sysfsRoot = dirs.fakefsBaseDir,
-            windowProvider = sessionWindowProvider
+            windowProvider = sessionWindowProvider,
+            graphics = object : com.alw.workstation.core.session.rice.RiceGraphicsControl {
+                override fun actualFps(): Float = serverManager?.let {
+                    it.refreshGraphicsStats()
+                    it.actualFps
+                } ?: 0f
+
+                override fun renderScale(): Float = serverManager?.renderScale ?: 0.75f
+
+                override fun setRenderScale(scale: Float) {
+                    serverManager?.setRenderScale(scale)
+                }
+
+                override fun outputSize(): Pair<Int, Int> {
+                    val manager = serverManager ?: return 3200 to 2136
+                    val scale = manager.renderScale
+                    return (manager.outputWidth * scale).toInt() to
+                        (manager.outputHeight * scale).toInt()
+                }
+            }
         )
         try {
             bridge.start()

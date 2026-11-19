@@ -98,6 +98,7 @@ class ConfigSynthesizerTest {
         assertTrue(config.contains("swaybg -i"))
         assertTrue(config.contains("waybar -c \$B/config.jsonc"))
         assertTrue(config.contains("qs -c sekaipop"))
+        assertTrue(config.contains("qs -c alw-fps"))
         assertTrue(config.contains("hl.window_rule({ match = { class = \"^(kitty)$\" }"))
         assertFalse(config.contains("hyprland/workspaces"))
     }

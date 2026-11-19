@@ -62,8 +62,8 @@ class ProotRunnerTest {
         assertTrue(envArgs.any { it.startsWith("GOCACHE=/home/alw/.cache/go-build") })
 
         // Check Turnip KGSL driver env vars
-        assertTrue(envArgs.any { it.startsWith("VK_ICD_FILENAMES=/opt/drivers/turnip/active/freedreno_icd.aarch64.json") })
-        assertTrue(envArgs.any { it.startsWith("VK_DRIVER_FILES=/opt/drivers/turnip/active/freedreno_icd.aarch64.json") })
+        assertTrue(envArgs.any { it.startsWith("VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json") })
+        assertTrue(envArgs.any { it.startsWith("VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json") })
         assertTrue(envArgs.any { it.startsWith("MESA_LOADER_DRIVER_OVERRIDE=kms_swrast") })
         assertTrue(envArgs.none { it.startsWith("GALLIUM_DRIVER=") })
         assertTrue(envArgs.any { it.startsWith("TU_DEBUG=noconform") })

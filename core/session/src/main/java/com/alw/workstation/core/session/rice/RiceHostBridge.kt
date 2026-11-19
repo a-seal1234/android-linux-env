@@ -26,12 +26,23 @@ import kotlin.math.roundToInt
  * (battery, screen brightness, media volume, network) instead of failing on missing
  * systemd / upower / NetworkManager / sysfs nodes.
  */
+/**
+ * Live graphics state exposed to guest rices (FPS, dynamic render scale).
+ */
+interface RiceGraphicsControl {
+    fun actualFps(): Float
+    fun renderScale(): Float
+    fun setRenderScale(scale: Float)
+    fun outputSize(): Pair<Int, Int>
+}
+
 class RiceHostBridge(
     private val context: Context,
     private val socketFile: File,
     private val sysfsRoot: File? = null,
     private val windowProvider: (() -> Window?)? = null,
-    private val sysfsRefreshMillis: Long = 10_000L
+    private val sysfsRefreshMillis: Long = 10_000L,
+    private val graphics: RiceGraphicsControl? = null
 ) {
     companion object {
         const val TAG = "ALW::RiceHostBridge"
@@ -168,12 +179,39 @@ class RiceHostBridge(
                 "brightness" -> brightness(parts)
                 "volume" -> volume(parts)
                 "network" -> network()
+                "fps" -> fps()
+                "scale" -> scale(parts)
                 "open" -> open(parts.drop(1).joinToString(" "))
                 else -> "error=unknown-command\n"
             }
         } catch (e: Throwable) {
             Log.w(TAG, "command '$request' failed: ${e.message}")
             "error=${e.message ?: "failed"}\n"
+        }
+    }
+
+    // --- graphics ----------------------------------------------------------
+
+    private fun fps(): String {
+        val control = graphics ?: return "error=graphics-unavailable\n"
+        val (width, height) = control.outputSize()
+        return "fps=${control.actualFps().toInt()} res=${width}x${height} " +
+            "scale=${"%.2f".format(control.renderScale())} gpu=zink-adreno825\n"
+    }
+
+    private fun scale(parts: List<String>): String {
+        val control = graphics ?: return "error=graphics-unavailable\n"
+        val action = parts.getOrNull(1) ?: "get"
+        return when (action) {
+            "get" -> "scale=${"%.2f".format(control.renderScale())}\n"
+            "set" -> {
+                val requested = parts.getOrNull(2)?.toFloatOrNull()
+                    ?: return "error=invalid-scale\n"
+                if (requested < 0.35f || requested > 1.0f) return "error=out-of-range\n"
+                control.setRenderScale(requested)
+                "ok=1 scale=${"%.2f".format(control.renderScale())}\n"
+            }
+            else -> "error=unknown-scale-command\n"
         }
     }
 

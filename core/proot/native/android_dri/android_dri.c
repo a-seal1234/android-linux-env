@@ -193,6 +193,7 @@ struct drm_set_client_cap {
 #define DRM_CAP_PRIME              0x5
 #define DRM_CAP_TIMESTAMP_MONOTONIC 0x6
 #define DRM_CAP_ADDFB2_MODIFIERS   0x10
+#define DRM_CAP_SYNCOBJ            0x13
 
 /* --- Per-tracee virtual DRM fd tracking --- */
 
@@ -464,6 +465,8 @@ static void emulate_ioctl(Tracee *tracee, int fd, unsigned long request, word_t 
 				cap.value = 1;
 			else if (cap.capability == DRM_CAP_ADDFB2_MODIFIERS)
 				cap.value = 1;
+			else if (cap.capability == DRM_CAP_SYNCOBJ)
+				cap.value = 0; /* no syncobj fd passing under PRoot */
 			else
 				cap.value = 0;
 			write_data(tracee, arg, &cap, sizeof(*&cap));

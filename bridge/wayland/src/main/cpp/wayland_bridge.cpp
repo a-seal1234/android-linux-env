@@ -2,6 +2,18 @@
 #include <android/log.h>
 #include <android/looper.h>
 #include <android/native_window.h>
+#include <EGL/egl.h>
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+
+// ES3-only enums: the ES2 headers do not declare them, but the values are stable
+// and only meaningful once a GLES3 context is current.
+#ifndef GL_UNPACK_ROW_LENGTH
+#define GL_UNPACK_ROW_LENGTH 0x0CF2
+#endif
+#ifndef EGL_OPENGL_ES3_BIT
+#define EGL_OPENGL_ES3_BIT 0x0040
+#endif
 #include <android/native_window_jni.h>
 #include <android/hardware_buffer.h>
 
@@ -316,6 +328,7 @@ struct WaylandClient {
     uint32_t activeSurfaceId = 0;
     bool pointerEntered = false;
     bool keyboardEntered = false;
+    int lastSentModifiers = -1;
 
     std::vector<uint8_t> recvBuffer;
     int pendingFd = -1;
@@ -558,8 +571,10 @@ public:
         m_nativeWindow = window;
         if (m_nativeWindow != nullptr) {
             ANativeWindow_acquire(m_nativeWindow);
-            ANativeWindow_setBuffersGeometry(m_nativeWindow, m_width, m_height, WINDOW_FORMAT_RGBA_8888);
-            LOGI("Native window attached: %p (%dx%d)", m_nativeWindow, m_width, m_height);
+            ANativeWindow_setBuffersGeometry(m_nativeWindow, scaledWidth(), scaledHeight(),
+                                             WINDOW_FORMAT_RGBA_8888);
+            LOGI("Native window attached: %p (%dx%d, scale %.2f)", m_nativeWindow,
+                 scaledWidth(), scaledHeight(), m_renderScale.load());
         } else {
             LOGI("Native window detached");
         }
@@ -570,8 +585,10 @@ public:
         m_width = width;
         m_height = height;
         if (m_nativeWindow != nullptr) {
-            ANativeWindow_setBuffersGeometry(m_nativeWindow, m_width, m_height, WINDOW_FORMAT_RGBA_8888);
-            LOGI("Surface resized to %dx%d", m_width, m_height);
+            ANativeWindow_setBuffersGeometry(m_nativeWindow, scaledWidth(), scaledHeight(),
+                                             WINDOW_FORMAT_RGBA_8888);
+            LOGI("Surface resized to %dx%d (output %dx%d)", m_width, m_height,
+                 scaledWidth(), scaledHeight());
         }
     }
 
@@ -583,6 +600,346 @@ public:
     }
 
     float getRefreshRate() const { return m_refreshRateHz.load(); }
+
+    void destroyGlPresenter() {
+        if (m_glTexture != 0 && m_eglDisplay != EGL_NO_DISPLAY) {
+            eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext);
+            glDeleteTextures(1, &m_glTexture);
+            m_glTexture = 0;
+        }
+        if (m_glVbo != 0 && m_eglDisplay != EGL_NO_DISPLAY) {
+            eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext);
+            glDeleteBuffers(1, &m_glVbo);
+            m_glVbo = 0;
+        }
+        if (m_glProgram != 0 && m_eglDisplay != EGL_NO_DISPLAY) {
+            eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext);
+            glDeleteProgram(m_glProgram);
+            m_glProgram = 0;
+        }
+        if (m_eglDisplay != EGL_NO_DISPLAY) {
+            eglMakeCurrent(m_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            if (m_eglSurface != EGL_NO_SURFACE) eglDestroySurface(m_eglDisplay, m_eglSurface);
+            if (m_eglContext != EGL_NO_CONTEXT) eglDestroyContext(m_eglDisplay, m_eglContext);
+        }
+        m_eglSurface = EGL_NO_SURFACE;
+        m_eglContext = EGL_NO_CONTEXT;
+        m_glTexture = 0;
+        m_glProgram = 0;
+        m_glTexWidth = m_glTexHeight = 0;
+        m_glReady = false;
+        m_glTried = false;
+    }
+
+    static GLuint compileShader(GLenum type, const char* source) {
+        GLuint shader = glCreateShader(type);
+        if (shader == 0) return 0;
+        glShaderSource(shader, 1, &source, nullptr);
+        glCompileShader(shader);
+        GLint ok = 0;
+        glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
+        if (ok == GL_FALSE) {
+            LOGE("GLES: shader compile failed");
+            glDeleteShader(shader);
+            return 0;
+        }
+        return shader;
+    }
+
+    bool ensureGlPresenter() {
+        if (m_glReady) return true;
+        if (m_glTried) return false;
+        m_glTried = true;
+        if (m_nativeWindow == nullptr) return false;
+
+        m_eglDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+        EGLint major = 0, minor = 0;
+        if (m_eglDisplay == EGL_NO_DISPLAY || !eglInitialize(m_eglDisplay, &major, &minor)) {
+            LOGW("GLES: eglInitialize failed (0x%x); falling back to CPU blit", eglGetError());
+            m_eglDisplay = EGL_NO_DISPLAY;
+            return false;
+        }
+
+        const EGLint configAttribs[] = {
+            EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+            EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+            EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
+            EGL_NONE
+        };
+        EGLConfig config = nullptr;
+        EGLint configCount = 0;
+        if (!eglChooseConfig(m_eglDisplay, configAttribs, &config, 1, &configCount) || configCount < 1) {
+            LOGW("GLES: no EGL config; falling back to CPU blit");
+            destroyGlPresenter();
+            return false;
+        }
+
+        m_eglSurface = eglCreateWindowSurface(m_eglDisplay, config, m_nativeWindow, nullptr);
+        if (m_eglSurface == EGL_NO_SURFACE) {
+            LOGW("GLES: eglCreateWindowSurface failed (0x%x)", eglGetError());
+            destroyGlPresenter();
+            return false;
+        }
+
+        const EGLint es3Attribs[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
+        m_eglContext = eglCreateContext(m_eglDisplay, config, EGL_NO_CONTEXT, es3Attribs);
+        m_glEs3 = m_eglContext != EGL_NO_CONTEXT;
+        if (!m_glEs3) {
+            // Fall back to ES2 (tight-stride uploads only).
+            const EGLint es2Attribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
+            m_eglContext = eglCreateContext(m_eglDisplay, config, EGL_NO_CONTEXT, es2Attribs);
+        }
+        if (m_eglContext == EGL_NO_CONTEXT ||
+            !eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext)) {
+            LOGW("GLES: context creation failed (0x%x)", eglGetError());
+            destroyGlPresenter();
+            return false;
+        }
+        eglSwapInterval(m_eglDisplay, 0);
+
+        static const char* kVertexEs3 =
+            "#version 300 es\n"
+            "in vec2 aPos; in vec2 aTex; out vec2 vTex; uniform vec2 uScale;\n"
+            "void main() { gl_Position = vec4(aPos * uScale, 0.0, 1.0); vTex = aTex; }\n";
+        static const char* kFragmentEs3 =
+            "#version 300 es\n"
+            "precision mediump float; in vec2 vTex; out vec4 fragColor;\n"
+            "uniform sampler2D uTex;\n"
+            "void main() { fragColor = vec4(texture(uTex, vTex).rgb, 1.0); }\n";
+        static const char* kVertexEs2 =
+            "attribute vec2 aPos;\n"
+            "attribute vec2 aTex;\n"
+            "varying vec2 vTex;\n"
+            "uniform vec2 uScale;\n"
+            "void main() { gl_Position = vec4(aPos * uScale, 0.0, 1.0); vTex = aTex; }\n";
+        static const char* kFragmentEs2 =
+            "precision mediump float;\n"
+            "varying vec2 vTex;\n"
+            "uniform sampler2D uTex;\n"
+            "void main() { gl_FragColor = vec4(texture2D(uTex, vTex).rgb, 1.0); }\n";
+
+        GLuint vs = compileShader(GL_VERTEX_SHADER, m_glEs3 ? kVertexEs3 : kVertexEs2);
+        GLuint fs = compileShader(GL_FRAGMENT_SHADER, m_glEs3 ? kFragmentEs3 : kFragmentEs2);
+        if (vs == 0 || fs == 0) {
+            if (vs) glDeleteShader(vs);
+            if (fs) glDeleteShader(fs);
+            destroyGlPresenter();
+            return false;
+        }
+        m_glProgram = glCreateProgram();
+        glAttachShader(m_glProgram, vs);
+        glAttachShader(m_glProgram, fs);
+        glLinkProgram(m_glProgram);
+        glDeleteShader(vs);
+        glDeleteShader(fs);
+        GLint linked = 0;
+        glGetProgramiv(m_glProgram, GL_LINK_STATUS, &linked);
+        if (linked == GL_FALSE) {
+            LOGW("GLES: program link failed");
+            destroyGlPresenter();
+            return false;
+        }
+
+        m_glPosAttr = glGetAttribLocation(m_glProgram, "aPos");
+        m_glTexAttr = glGetAttribLocation(m_glProgram, "aTex");
+        m_glSampler = glGetUniformLocation(m_glProgram, "uTex");
+        m_glScaleUniform = glGetUniformLocation(m_glProgram, "uScale");
+
+        // Static fullscreen quad: (x, y, u, v). ES3 forbids client-side arrays.
+        static const GLfloat kQuad[] = {
+            -1.0f, -1.0f, 0.0f, 0.0f,
+             1.0f, -1.0f, 1.0f, 0.0f,
+            -1.0f,  1.0f, 0.0f, 1.0f,
+             1.0f,  1.0f, 1.0f, 1.0f
+        };
+        glGenBuffers(1, &m_glVbo);
+        glBindBuffer(GL_ARRAY_BUFFER, m_glVbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(kQuad), kQuad, GL_STATIC_DRAW);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+        glGenTextures(1, &m_glTexture);
+        glBindTexture(GL_TEXTURE_2D, m_glTexture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+        m_glReady = true;
+        LOGI("GLES presenter ready (%s, es3=%d)",
+             reinterpret_cast<const char*>(glGetString(GL_RENDERER)),
+             m_glEs3 ? 1 : 0);
+        return true;
+    }
+
+    // Uploads the guest frame as a texture and draws a fullscreen quad on Adreno.
+    bool presentWithGl(const uint8_t* src, int width, int height, int stride, uint32_t format) {
+        if (!ensureGlPresenter()) return false;
+        if (!eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext))
+            return false;
+
+        if (m_glTexWidth != width || m_glTexHeight != height) {
+            glBindTexture(GL_TEXTURE_2D, m_glTexture);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
+                         GL_UNSIGNED_BYTE, nullptr);
+            m_glTexWidth = width;
+            m_glTexHeight = height;
+        }
+
+        // GLES2 has no UNPACK_ROW_LENGTH; the guest buffers are tightly packed
+        // (stride == width * 4). Anything else keeps the CPU path for correctness.
+        // Guest buffers are padded to 64 bytes (stride 9728 for a 2400 px row).
+        // GL_EXT_unpack_subimage lets the driver honour that row length directly.
+        if (stride != width * 4) {
+            if (!m_glEs3) {
+                static int s_strideLog = 0;
+                if (++s_strideLog <= 5)
+                    LOGW("GLES: padded stride %d needs ES3", stride);
+                return false;
+            }
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 4);
+        } else if (m_glEs3) {
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        }
+
+        glBindTexture(GL_TEXTURE_2D, m_glTexture);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        const GLenum uploadFormat = (format == 0 || format == 1) ? GL_BGRA_EXT : GL_RGBA;
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, uploadFormat,
+                        GL_UNSIGNED_BYTE, src);
+
+        EGLint surfaceWidth = 0, surfaceHeight = 0;
+        eglQuerySurface(m_eglDisplay, m_eglSurface, EGL_WIDTH, &surfaceWidth);
+        eglQuerySurface(m_eglDisplay, m_eglSurface, EGL_HEIGHT, &surfaceHeight);
+        if (surfaceWidth <= 0 || surfaceHeight <= 0) return false;
+
+        // Aspect-preserving letterbox so a mismatched guest size never stretches.
+        const float srcAspect = static_cast<float>(width) / static_cast<float>(height);
+        const float dstAspect = static_cast<float>(surfaceWidth) / static_cast<float>(surfaceHeight);
+        float scaleX = 1.0f, scaleY = 1.0f, scaleZ = 0.0f;
+        if (srcAspect > dstAspect) scaleY = dstAspect / srcAspect;
+        else scaleX = srcAspect / dstAspect;
+
+        glViewport(0, 0, surfaceWidth, surfaceHeight);
+        glDisable(GL_BLEND);
+        glDisable(GL_DEPTH_TEST);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        glUseProgram(m_glProgram);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, m_glTexture);
+        if (m_glSampler >= 0) glUniform1i(m_glSampler, 0);
+        if (m_glScaleUniform >= 0) glUniform2f(m_glScaleUniform, scaleX, scaleY);
+
+        glBindBuffer(GL_ARRAY_BUFFER, m_glVbo);
+        if (m_glPosAttr >= 0) {
+            glEnableVertexAttribArray(m_glPosAttr);
+            glVertexAttribPointer(m_glPosAttr, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat),
+                                  reinterpret_cast<const void*>(0));
+        }
+        if (m_glTexAttr >= 0) {
+            glEnableVertexAttribArray(m_glTexAttr);
+            glVertexAttribPointer(m_glTexAttr, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat),
+                                  reinterpret_cast<const void*>(2 * sizeof(GLfloat)));
+        }
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        if (m_glPosAttr >= 0) glDisableVertexAttribArray(m_glPosAttr);
+        if (m_glTexAttr >= 0) glDisableVertexAttribArray(m_glTexAttr);
+
+        (void) scaleZ;
+        const EGLBoolean swapped = eglSwapBuffers(m_eglDisplay, m_eglSurface);
+        m_glVideo[0] = swapped == EGL_TRUE;
+        if (swapped != EGL_TRUE) {
+            static int s_swapFailLog = 0;
+            if (++s_swapFailLog <= 5) {
+                LOGW("GLES: eglSwapBuffers failed (0x%x) surface=%dx%d src=%dx%d stride=%d",
+                     eglGetError(), surfaceWidth, surfaceHeight, width, height, stride);
+            }
+            return false;
+        }
+        return true;
+    }
+
+    float getRenderScale() const { return m_renderScale.load(); }
+    float getActualFps() const { return m_actualFps.load(); }
+
+    static int align2(int value) { return (value + 1) & ~1; }
+
+    int scaledWidth() const {
+        return std::max(2, align2(static_cast<int>(m_width * m_renderScale.load())));
+    }
+    int scaledHeight() const {
+        return std::max(2, align2(static_cast<int>(m_height * m_renderScale.load())));
+    }
+
+    // Re-emits wl_output.mode and re-configures every xdg_toplevel so the guest
+    // compositor rebuilds its swapchain at the new size without restarting.
+    void broadcastOutputResizeLocked(int width, int height) {
+        for (auto& pair : m_clients) {
+            auto& client = pair.second;
+            if (client.outputId > 0) {
+                WaylandMessageWriter mode(client.outputId, 1); // wl_output.mode
+                mode.putUint32(0x1 | 0x2);
+                mode.putInt32(width);
+                mode.putInt32(height);
+                mode.putInt32(static_cast<int32_t>(getRefreshRate() * 1000.0f));
+                sendPacket(client.fd, mode);
+
+                WaylandMessageWriter done(client.outputId, 2); // wl_output.done
+                sendPacket(client.fd, done);
+            }
+
+            for (auto& tlPair : client.xdgToplevels) {
+                const auto& toplevel = tlPair.second;
+                WaylandMessageWriter cfg(toplevel.id, 0); // xdg_toplevel.configure
+                cfg.putInt32(width);
+                cfg.putInt32(height);
+                uint32_t states[] = {1, 4}; // MAXIMIZED | ACTIVATED
+                cfg.putArray(states, sizeof(states));
+                sendPacket(client.fd, cfg);
+
+                for (auto& xsPair : client.xdgSurfaces) {
+                    auto& xdgSurface = xsPair.second;
+                    if (xdgSurface.toplevelId != toplevel.id)
+                        continue;
+                    const uint32_t serial = nextSerial();
+                    xdgSurface.lastConfigureSerial = serial;
+                    WaylandMessageWriter surfCfg(xdgSurface.id, 0); // xdg_surface.configure
+                    surfCfg.putUint32(serial);
+                    sendPacket(client.fd, surfCfg);
+                }
+            }
+        }
+    }
+
+    void setRenderScale(float scale) {
+        scale = std::clamp(scale, 0.35f, 1.0f);
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        m_renderScale.store(scale);
+        if (m_glReady) {
+            eglMakeCurrent(m_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            if (m_eglSurface != EGL_NO_SURFACE) {
+                eglDestroySurface(m_eglDisplay, m_eglSurface);
+                m_eglSurface = EGL_NO_SURFACE;
+            }
+            m_glReady = false;
+            m_glTried = false;
+        }
+
+        const int width = scaledWidth();
+        const int height = scaledHeight();
+        m_windowShadow.clear();
+        m_shadowWidth = m_shadowHeight = m_shadowStride = 0;
+        m_cursorDrawnX = m_cursorDrawnY = -1;
+
+        if (m_nativeWindow != nullptr) {
+            ANativeWindow_setBuffersGeometry(m_nativeWindow, width, height,
+                                             WINDOW_FORMAT_RGBA_8888);
+        }
+        broadcastOutputResizeLocked(width, height);
+        LOGI("Render scale %.2f -> output %dx%d", scale, width, height);
+    }
 
     bool isRunning() const { return m_running.load(); }
     int getActiveClientsCount() const { return m_activeClients.load(); }
@@ -750,6 +1107,34 @@ public:
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         if (m_nativeWindow == nullptr || src == nullptr) return;
 
+        // The EGL/GLES2 presenter is opt-in: on the Xiaomi Pad 8 it initializes on the
+        // Adreno 825 and swaps, but the composed frame does not reach the surface yet,
+        // so the CPU blit stays the default until that is resolved.
+        static const bool s_glesPresenterEnabled = []() {
+            const char* value = getenv("ALW_GLES_BLIT");
+            return value != nullptr && value[0] == '1';
+        }();
+        if (!s_glesPresenterEnabled) {
+            // CPU path below; EGL must not own the window in that case.
+        } else if (m_glReady && !presentWithGl(src, srcWidth, srcHeight, srcStride, format)) {
+            static int s_glDropLog = 0;
+            if (++s_glDropLog % 60 == 1)
+                LOGW("GLES: frame dropped (presenter active, swap failed)");
+            return;
+        }
+
+        // Primary path (opt-in): upload to a GLES2 texture and draw through Adreno.
+        if (s_glesPresenterEnabled &&
+            presentWithGl(src, srcWidth, srcHeight, srcStride, format)) {
+            m_blitCounter.fetch_add(1, std::memory_order_relaxed);
+            static int s_glFrameLog = 0;
+            if (++s_glFrameLog % 60 == 1) {
+                LOGI("GLES blit #%d: %dx%d (scale %.2f, fps %.1f)", s_glFrameLog,
+                     srcWidth, srcHeight, m_renderScale.load(), m_actualFps.load());
+            }
+            return;
+        }
+
         ANativeWindow_Buffer outBuffer;
         if (ANativeWindow_lock(m_nativeWindow, &outBuffer, nullptr) != 0) {
             LOGW("ANativeWindow_lock failed during frame blit");
@@ -830,6 +1215,7 @@ public:
         }
 
         ANativeWindow_unlockAndPost(m_nativeWindow);
+        m_blitCounter.fetch_add(1, std::memory_order_relaxed);
 
         auto now = std::chrono::steady_clock::now();
         std::chrono::duration<double, std::milli> frameDelta = now - m_lastFrameTime;
@@ -1017,7 +1403,18 @@ public:
         }
     }
 
-    void sendKeyEvent(int scanCode, bool isDown) {
+    // Android meta-state bits -> XKB mods_depressed bits.
+    // META_SHIFT_ON=1, META_ALT_ON=2, META_CTRL_ON=0x1000, META_META_ON=0x10000.
+    static uint32_t modsFromMetaState(uint32_t metaState) {
+        uint32_t mods = 0;
+        if (metaState & 0x00000001u) mods |= (1u << 0); // Shift
+        if (metaState & 0x00001000u) mods |= (1u << 2); // Control
+        if (metaState & 0x00000002u) mods |= (1u << 3); // Alt
+        if (metaState & 0x00010000u) mods |= (1u << 6); // Super
+        return mods;
+    }
+
+    void sendKeyEvent(int scanCode, bool isDown, uint32_t metaState = 0) {
         std::lock_guard<std::mutex> lock(m_inputMutex);
         std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
 
@@ -1028,6 +1425,8 @@ public:
         else if (scanCode == 56 || scanCode == 100) modBit = (1 << 3); // Alt
         else if (scanCode == 125 || scanCode == 126) modBit = (1 << 6);// Super / Meta
 
+        const uint32_t trackedModifiers = m_depressedModifiers;
+
         if (modBit != 0) {
             if (scanCode == 58) {
                 if (isDown) m_lockedModifiers ^= modBit;
@@ -1036,6 +1435,13 @@ public:
                 else m_depressedModifiers &= ~modBit;
             }
         }
+
+        // Android reports the effective modifier state (physical Ctrl/Shift/Alt held
+        // while a letter is typed). Merge it with the explicitly tracked modifier
+        // keys so Ctrl+C, nano's Ctrl+X/Ctrl+O, etc. arrive with the right mask.
+        m_depressedModifiers = (m_depressedModifiers & modBit != 0 ? m_depressedModifiers : trackedModifiers) |
+                               modsFromMetaState(metaState);
+        if (modBit != 0 && isDown) m_depressedModifiers |= modBit;
 
         uint32_t now = nowMillis();
         uint32_t keySerial = nextSerial();
@@ -1059,13 +1465,16 @@ public:
                 keyMsg.putUint32(isDown ? 1 : 0);
                 sendPacket(client.fd, keyMsg);
 
-                WaylandMessageWriter modMsg(client.keyboardId, 4); // modifiers
-                modMsg.putUint32(nextSerial());
-                modMsg.putUint32(m_depressedModifiers);
-                modMsg.putUint32(0);
-                modMsg.putUint32(m_lockedModifiers);
-                modMsg.putUint32(0);
-                sendPacket(client.fd, modMsg);
+                if (static_cast<int>(m_depressedModifiers) != client.lastSentModifiers) {
+                    WaylandMessageWriter modMsg(client.keyboardId, 4); // modifiers
+                    modMsg.putUint32(nextSerial());
+                    modMsg.putUint32(m_depressedModifiers);
+                    modMsg.putUint32(0);
+                    modMsg.putUint32(m_lockedModifiers);
+                    modMsg.putUint32(0);
+                    sendPacket(client.fd, modMsg);
+                    client.lastSentModifiers = static_cast<int>(m_depressedModifiers);
+                }
             }
         }
     }
@@ -1208,7 +1617,20 @@ private:
 
         LOGI("Frame pacing fallback thread started (%.1f Hz base rate)", m_refreshRateHz.load());
 
+        auto lastFpsSample = std::chrono::steady_clock::now();
+        uint64_t lastBlitCount = m_blitCounter.load();
+
         while (m_running.load()) {
+            const auto fpsNow = std::chrono::steady_clock::now();
+            const double fpsElapsed =
+                std::chrono::duration<double>(fpsNow - lastFpsSample).count();
+            if (fpsElapsed >= 1.0) {
+                const uint64_t blits = m_blitCounter.load();
+                m_actualFps.store(static_cast<float>((blits - lastBlitCount) / fpsElapsed));
+                lastBlitCount = blits;
+                lastFpsSample = fpsNow;
+            }
+
             float hz = m_refreshRateHz.load();
             if (hz < 1.0f) hz = 60.0f;
             int frameIntervalMs = std::max(1, static_cast<int>(1000.0f / hz));
@@ -1663,8 +2085,8 @@ private:
                     // Send output mode (flags, width, height, refresh_mHz)
                     WaylandMessageWriter mode(newId, 1);
                     mode.putUint32(0x1 | 0x2); // current | preferred
-                    mode.putInt32(m_width);
-                    mode.putInt32(m_height);
+                    mode.putInt32(scaledWidth());
+                    mode.putInt32(scaledHeight());
                     mode.putInt32(static_cast<int32_t>(getRefreshRate() * 1000.0f));
                     sendPacket(client.fd, mode);
 
@@ -2141,8 +2563,8 @@ private:
 
                 // Send xdg_toplevel.configure(width, height, states)
                 WaylandMessageWriter tlConfig(toplevelId, 0);
-                tlConfig.putInt32(m_width);
-                tlConfig.putInt32(m_height);
+                tlConfig.putInt32(scaledWidth());
+                tlConfig.putInt32(scaledHeight());
                 uint32_t states[] = {1, 4}; // XDG_TOPLEVEL_STATE_MAXIMIZED (1), XDG_TOPLEVEL_STATE_ACTIVATED (4)
                 tlConfig.putArray(states, sizeof(states));
                 sendPacket(client.fd, tlConfig);
@@ -2608,6 +3030,29 @@ private:
         bool valid() const { return width > 0 && height > 0 && !pixels.empty(); }
     };
 
+    // --- GPU presentation (EGL/GLES2 on the ANativeWindow) -----------------
+    EGLDisplay m_eglDisplay = EGL_NO_DISPLAY;
+    EGLSurface m_eglSurface = EGL_NO_SURFACE;
+    EGLContext m_eglContext = EGL_NO_CONTEXT;
+    GLuint m_glProgram = 0;
+    GLuint m_glTexture = 0;
+    GLuint m_glVbo = 0;
+    GLint m_glScaleUniform = -1;
+    GLint m_glPosAttr = -1;
+    GLint m_glTexAttr = -1;
+    GLint m_glSampler = -1;
+    int m_glTexWidth = 0;
+    int m_glTexHeight = 0;
+    bool m_glTried = false;
+    bool m_glReady = false;
+    bool m_glEs3 = false;
+    bool m_glVideo[4] = {false, false, false, false};
+
+    // --- Live performance / dynamic render scale (TASK-025) ----------------
+    std::atomic<float> m_renderScale{0.75f};   // 0.35 .. 1.0
+    std::atomic<float> m_actualFps{0.0f};
+    std::atomic<uint64_t> m_blitCounter{0};
+
     CursorImage m_cursorImage;
     std::vector<uint8_t> m_windowShadow; // clean copy of the last full frame
     int m_shadowWidth = 0;
@@ -2685,6 +3130,37 @@ Java_com_alw_workstation_core_session_rice_RiceHostBridge_nativeCreateUnixServer
 // Android's LocalServerSocket cannot reliably accept on a natively bound
 // filesystem fd (ART crashes inside Linux_accept), so accept/read/write are
 // done here and only plain fds cross the JNI boundary.
+extern "C" JNIEXPORT void JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSetRenderScale(
+    JNIEnv* env,
+    jobject thiz,
+    jfloat scale
+) {
+    (void) env;
+    (void) thiz;
+    getServer()->setRenderScale(static_cast<float>(scale));
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeGetRenderScale(
+    JNIEnv* env,
+    jobject thiz
+) {
+    (void) env;
+    (void) thiz;
+    return getServer()->getRenderScale();
+}
+
+extern "C" JNIEXPORT jfloat JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeGetActualFps(
+    JNIEnv* env,
+    jobject thiz
+) {
+    (void) env;
+    (void) thiz;
+    return getServer()->getActualFps();
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_com_alw_workstation_core_session_rice_RiceHostBridge_nativeAccept(
     JNIEnv* env,
@@ -2942,9 +3418,11 @@ Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSendKeyEvent(
     JNIEnv* env,
     jobject thiz,
     jint scanCode,
-    jboolean isDown
+    jboolean isDown,
+    jint metaState
 ) {
-    getServer()->sendKeyEvent(scanCode, isDown == JNI_TRUE);
+    getServer()->sendKeyEvent(scanCode, isDown == JNI_TRUE,
+                              static_cast<uint32_t>(metaState));
 }
 
 extern "C" JNIEXPORT void JNICALL
