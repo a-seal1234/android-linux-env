@@ -1,0 +1,9 @@
+window {
+  background: rgba(85, 84, 115, 0.95);
+  border: 2px solid #04feee;
+  border-radius: 16px;
+  color: #d9fff6;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+}
+#input { background: rgba(110, 109, 148, 0.6); color: #d9fff6; border: none; border-radius: 10px; padding: 8px; }
+#entry:selected { background: #04feee; color: #555473; border-radius: 10px; }

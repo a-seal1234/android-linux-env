@@ -1,0 +1,44 @@
+{
+  "layer": "top",
+  "position": "top",
+  "height": 38,
+  "margin-top": 6,
+  "margin-left": 10,
+  "margin-right": 10,
+  "spacing": 8,
+  "modules-left": ["custom/logo", "custom/sep", "clock"],
+  "modules-center": [],
+  "modules-right": ["pulseaudio", "network", "backlight", "battery"],
+  "custom/logo": {
+    "format": "♪ Sekai Pop",
+    "tooltip": false
+  },
+  "custom/sep": { "format": "│", "tooltip": false },
+  "clock": {
+    "format": "{:%H:%M  %a %d %b}",
+    "tooltip-format": "{calendar}"
+  },
+  "backlight": {
+    "device": "alw_backlight",
+    "format": "☀ {percent}%",
+    "interval": 2
+  },
+  "battery": {
+    "bat": "BAT0",
+    "interval": 5,
+    "format": "{capacity}%",
+    "states": { "warning": 20, "critical": 10 }
+  },
+  "network": {
+    "interval": 5,
+    "format-wifi": " {essid} {signalStrength}%",
+    "format-ethernet": "󰈀 {ipaddr}",
+    "format-disconnected": "offline",
+    "tooltip-format-wifi": "{essid} ({signalStrength}%) {ipaddr}"
+  },
+  "pulseaudio": {
+    "format": "{icon} {volume}%",
+    "format-muted": "muted",
+    "format-icons": { "default": ["", "", ""] }
+  }
+}

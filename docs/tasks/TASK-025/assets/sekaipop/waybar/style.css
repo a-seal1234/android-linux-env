@@ -1,0 +1,30 @@
+/* Sekai Pop palette (Blapples/SekaiPop) — PRoot-safe Waybar theme */
+* {
+  font-family: "JetBrainsMono Nerd Font", "Symbols Nerd Font", monospace;
+  font-size: 15px;
+  min-height: 0;
+}
+window#waybar {
+  background: rgba(85, 84, 115, 0.88);
+  color: #d9fff6;
+  border: 2px solid #04feee;
+  border-radius: 16px;
+}
+#custom-logo {
+  padding: 0 14px;
+  color: #04feee;
+  font-weight: bold;
+}
+#custom-sep { color: #6e6d94; }
+#clock, #battery, #backlight, #network, #pulseaudio {
+  padding: 0 12px;
+  margin: 4px 2px;
+  border-radius: 10px;
+  background: rgba(110, 109, 148, 0.55);
+}
+#clock { color: #00ffcb; }
+#battery.charging { color: #00ffcb; }
+#battery.warning { color: #ffd166; }
+#battery.critical { color: #ff6b9d; }
+#network.disconnected { color: #ff6b9d; }
+#pulseaudio.muted { color: #ff6b9d; }

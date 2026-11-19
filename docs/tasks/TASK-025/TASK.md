@@ -125,6 +125,68 @@ values that track the real hardware without a socket round-trip.
    battery/backlight/audio/network modules render and react.
 4. Capture screenshots/logs into `docs/tasks/TASK-025/evidence/`.
 
+## 4b. Host CachyOS Lua import + Sekai Pop rice (follow-up)
+
+The host's native Hyprland 0.57 Lua tree (`/home/seal/.config/hypr/`) is imported
+verbatim into `/home/alw/.config/hypr/` and `/root/.config/hypr/` inside the guest
+rootfs (`hyprland.lua`, `config/*.lua`, `hyprland/*.lua`). Host-only NVIDIA env
+lines in `config/environment.lua` (`GBM_BACKEND`, `__GLX_VENDOR_LIBRARY_NAME`,
+`LIBVA_DRIVER_NAME`, `__GL_GSYNC_ALLOWED`) are commented out in the guest copy,
+because a `nvidia-drm` GBM backend breaks the kms_swrast EGL init.
+
+`/tmp/android-session.lua` now (in order):
+
+1. prepends `/home/alw/.config/hypr/?.lua;/home/alw/.config/hypr/?/init.lua;/root/.config/hypr/?.lua;`
+   to `package.path` so the modular `require("config.*")` calls resolve;
+2. `pcall(dofile, "/home/alw/.config/hypr/hyprland.lua")` (falling back to
+   `keybinds.lua`) so a host-specific helper failure never aborts startup;
+3. `pcall(dofile, ".../sekaipop-theme.lua")` for the rice aesthetics;
+4. **re-applies** `xwayland.enabled = false`, `cursor.no_hardware_cursors = 1`,
+   `WAYLAND_DISPLAY`/`AQ_BACKEND`/`WLR_BACKENDS`/`LIBSEAT_BACKEND` env and the
+   `hl.monitor({ output = "", mode = "preferred", position = "auto", scale })`
+   rule **after** the user config, plus the essential SUPER binds.
+
+Packages installed in the guest (Arch Linux ARM): `swaybg`, `hyprpaper`, `mako`,
+`jq`, `ttf-jetbrains-mono-nerd`, `papirus-icon-theme` (Waybar, wofi, kitty,
+konsole were already present). `matugen` is AUR-only, so the Sekai Pop palette is
+applied statically from `sekaipop/services/PaletteService.qml`
+(`#555473`, `#6e6d94`, `#04feee`, `#00ffcb`, `#d9fff6`).
+
+Deployed rice assets (both `/home/alw` and `/root`): Sekai Pop wallpaper
+(`~/.config/hypr/assets/sekaipop-wallpaper.png`), Waybar
+(`~/.config/waybar/sekaipop/{config.jsonc,style.css}`), the theme layer
+(`~/.config/hypr/sekaipop-theme.lua`), `hyprpaper.conf`, GTK 3/4 settings
+(Adwaita-dark + Papirus-Dark + JetBrainsMono Nerd Font), Qt5/Qt6 ct, wofi and
+mako styling. `hl.on("hyprland.start")` starts hyprpaper (swaybg/swww fallbacks)
+and Waybar.
+
+**PRoot compatibility:** the Waybar layout deliberately has no
+`hyprland/workspaces` module (Hyprland's IPC socket path exceeds the 108-byte
+`sun_path` limit under PRoot). The active modules are `clock`, `battery` (fake
+`BAT0`), `pulseaudio` (`wpctl` shim), `network` (`nmcli` shim) and `backlight`
+(the shim's `brightnessctl` path; Waybar's own backlight module needs libudev).
+
+| AC | Criterion | Status |
+|----|-----------|--------|
+| **AC-11** | Host CachyOS Lua tree imported into both guest homes, modular `require()` resolving | **Done** |
+| **AC-12** | User entry loaded via `pcall(dofile, ...)` before the Android/PRoot overrides | **Done** — no Lua errors in the compositor log |
+| **AC-13** | Rice packages installed in the guest | **Done** — swaybg, hyprpaper, mako, jq, nerd font, Papirus |
+| **AC-14** | Sekai Pop wallpaper/Waybar/theme/GTK/Qt/wofi/mako assets deployed | **Done** |
+| **AC-15** | PRoot-safe Waybar (no `hyprland/workspaces`) using the TASK-025 shims + wallpaper/bar autostart | **Done** |
+| **AC-16** | Rice renders on-device; screenshot captured | **Done** — [screen_hyprland_sekaipop_rice.png](evidence/screen_hyprland_sekaipop_rice.png) |
+
+### Rice limitations
+
+1. **swaybg cannot decode images under PRoot**: its gdk-pixbuf/glycin loader
+   spawns `bwrap --unshare-all`, which PRoot forbids (`Failed to load image`).
+   `hyprpaper` 0.8 is used instead (block syntax `wallpaper { monitor/path }`),
+   verified painting the wallpaper ([hyprpaper_wallpaper.log](evidence/hyprpaper_wallpaper.log)).
+2. **Sekai Pop ships a Quickshell shell** (`qs -c end4-pC`). Quickshell is not
+   installed in the guest, so the desktop is realized as a Waybar-based
+   adaptation of the same palette/visuals; the shell's keybinds from the host
+   config still load (D-Bus-dependent helpers are no-ops).
+3. `hyprland/workspaces` stays disabled for the `sun_path` reason above.
+
 ## 5. On-device evidence (Xiaomi Pad 8, `d370854b`)
 
 ```

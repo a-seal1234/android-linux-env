@@ -39,8 +39,8 @@ class ConfigSynthesizerTest {
         assertTrue(config.contains("hl.bind(\"SUPER + Return\", hl.dsp.exec_cmd(\"kitty\"))"))
         assertTrue(config.contains("hl.bind(\"SUPER + M\", hl.dsp.exit())"))
 
-        // Hardware accelerated visuals (Turnip Adreno 825)
-        assertTrue(config.contains("rounding = 8"))
+        // Hardware accelerated visuals (Turnip Adreno 825). Rounding is owned by the
+        // imported Sekai Pop theme layer, so the synthesizer does not pin it.
         assertTrue(config.contains("blur = { enabled = true, size = 5, passes = 2 }"))
 
         // No legacy INI directives may leak into the Lua session config
@@ -63,9 +63,39 @@ class ConfigSynthesizerTest {
         val config = ConfigSynthesizer.synthesizeHyprlandSessionConfig(profile)
 
         // Software fallback disables expensive decorations
-        assertTrue(config.contains("rounding = 0"))
         assertTrue(config.contains("blur = { enabled = false }"))
         assertFalse(config.contains("size = 5"))
+    }
+
+    @Test
+    fun testSynthesizeImportsHostLuaConfigBeforeOverrides() {
+        val profile = StackProfile.defaultArchXiaomiPad8()
+        val config = ConfigSynthesizer.synthesizeHyprlandSessionConfig(profile)
+
+        // Modular require(...) resolution for the imported CachyOS tree
+        assertTrue(
+            config.contains(
+                "package.path = \"/home/alw/.config/hypr/?.lua;" +
+                    "/home/alw/.config/hypr/?/init.lua;/root/.config/hypr/?.lua;\" .. package.path"
+            )
+        )
+
+        // User entry + Sekai Pop theme are pcall-guarded
+        assertTrue(config.contains("pcall(dofile, entry)"))
+        assertTrue(config.contains("/home/alw/.config/hypr/hyprland.lua"))
+        assertTrue(config.contains("pcall(dofile, \"/home/alw/.config/hypr/sekaipop-theme.lua\")"))
+
+        // Android/PRoot overrides must land AFTER the user config loads
+        val userLoad = config.indexOf("/home/alw/.config/hypr/hyprland.lua")
+        val themeLoad = config.indexOf("sekaipop-theme.lua")
+        val overrides = config.indexOf("xwayland = { enabled = false }")
+        assertTrue(userLoad in 0 until themeLoad)
+        assertTrue(themeLoad < overrides)
+
+        // Sekai Pop rice autostart (wallpaper + PRoot-safe Waybar)
+        assertTrue(config.contains("swaybg -i"))
+        assertTrue(config.contains("waybar -c \$B/config.jsonc"))
+        assertFalse(config.contains("hyprland/workspaces"))
     }
 
     @Test

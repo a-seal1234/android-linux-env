@@ -43,7 +43,7 @@ class StackProfileTest {
 
         // Verifies the Lua session override is additive: the user config path is
         // referenced (never rewritten) and overrides are separate directives.
-        assertTrue(config.contains("User configuration stays untouched at /home/alw/.config/hypr/hyprland.conf"))
+        assertTrue(config.contains("stays untouched at /home/alw/.config/hypr/hyprland.conf"))
         assertTrue(config.contains("hl.config({"))
         assertTrue(config.contains("hl.monitor({"))
         assertTrue(config.contains("hl.env(\"WAYLAND_DISPLAY\", \"wayland-0\")"))
