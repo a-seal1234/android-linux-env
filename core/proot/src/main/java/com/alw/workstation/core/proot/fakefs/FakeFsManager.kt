@@ -61,6 +61,10 @@ class FakeFsManager(
     val procLoadavg: File get() = File(baseDir, "proc/loadavg")
     val procVersion: File get() = File(baseDir, "proc/version")
 
+    // TASK-025: fake sysfs trees consumed by rice battery/backlight modules.
+    val sysPowerSupplyDir: File get() = File(baseDir, "sys/class/power_supply/BAT0")
+    val sysBacklightDir: File get() = File(baseDir, "sys/class/backlight/alw_backlight")
+
     /**
      * Materializes all fake filesystem directories and files on host storage.
      */
@@ -149,7 +153,61 @@ class FakeFsManager(
         procLoadavg.writeText("0.10 0.08 0.05 1/250 1000\n")
         procVersion.writeText("Linux version 6.6.0-alw-proot-aarch64 (antigravity@alw-workstation) (gcc version 14.2.1 20240910 (GCC)) #1 SMP PREEMPT Sun Nov 15 20:00:00 UTC 2026\n")
 
+        materializeSysfs()
+
         return this
+    }
+
+    /**
+     * Materialises the fake power-supply / backlight nodes (TASK-025). RiceHostBridge
+     * refreshes their contents from BatteryManager and the live window brightness.
+     */
+    private fun materializeSysfs() {
+        val defaults = mapOf(
+            "capacity" to "50",
+            "status" to "Discharging",
+            "present" to "1",
+            "type" to "Battery",
+            "voltage_now" to "4200000",
+            "current_now" to "0",
+            "temperature" to "300"
+        )
+        if (!sysPowerSupplyDir.exists()) sysPowerSupplyDir.mkdirs()
+        for ((name, value) in defaults) {
+            val file = File(sysPowerSupplyDir, name)
+            if (!file.exists()) file.writeText("$value\n")
+        }
+        // Waybar/AGS require a uevent node to accept a power supply device.
+        val powerUevent = File(sysPowerSupplyDir, "uevent")
+        if (!powerUevent.exists()) {
+            powerUevent.writeText(
+                "POWER_SUPPLY_NAME=BAT0\n" +
+                    "POWER_SUPPLY_TYPE=Battery\n" +
+                    "POWER_SUPPLY_STATUS=Discharging\n" +
+                    "POWER_SUPPLY_PRESENT=1\n" +
+                    "POWER_SUPPLY_CAPACITY=50\n"
+            )
+        }
+
+        if (!sysBacklightDir.exists()) sysBacklightDir.mkdirs()
+        val backlightDefaults = mapOf(
+            "brightness" to "50",
+            "actual_brightness" to "50",
+            "max_brightness" to "100"
+        )
+        for ((name, value) in backlightDefaults) {
+            val file = File(sysBacklightDir, name)
+            if (!file.exists()) file.writeText("$value\n")
+        }
+        val backlightUevent = File(sysBacklightDir, "uevent")
+        if (!backlightUevent.exists()) backlightUevent.writeText("DEVTYPE=backlight\n")
+
+        listOf(sysPowerSupplyDir, sysBacklightDir).forEach { dir ->
+            try {
+                dir.setReadable(true, false)
+                dir.setExecutable(true, false)
+            } catch (_: Throwable) {}
+        }
     }
 
     private fun generateSyntheticStat(): String = buildString {
@@ -193,7 +251,12 @@ class FakeFsManager(
         mounts.add(BindMount(etcResolvConf.absolutePath, "/etc/resolv.conf"))
         mounts.add(BindMount(etcHosts.absolutePath, "/etc/hosts"))
 
-        // 3. Synthetic proc nodes (bound ONLY when host proc node is unreadable)
+        // 3. Fake sysfs trees for rice battery/backlight modules (TASK-025). Bind the
+        //    parent directories: Waybar/AGS scan them to discover devices.
+        mounts.add(BindMount(sysPowerSupplyDir.parentFile!!.absolutePath, "/sys/class/power_supply"))
+        mounts.add(BindMount(sysBacklightDir.parentFile!!.absolutePath, "/sys/class/backlight"))
+
+        // 4. Synthetic proc nodes (bound ONLY when host proc node is unreadable)
         val procNodes = listOf(
             "/proc/stat" to procStat,
             "/proc/uptime" to procUptime,

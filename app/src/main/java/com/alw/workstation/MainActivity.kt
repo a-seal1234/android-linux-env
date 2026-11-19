@@ -134,7 +134,9 @@ class MainActivity : ComponentActivity() {
             orchestrator = orchestrator,
             audioBridgeManager = audioBridgeManager,
             shizukuManager = shizukuCompanionManager,
-            serverManager = serverManager
+            serverManager = serverManager,
+            appContext = applicationContext,
+            sessionWindowProvider = { window }
         )
 
         stackConfiguratorViewModel = StackConfiguratorViewModel(

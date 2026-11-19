@@ -1,0 +1,3 @@
+[2026-11-19 10:41:57.649] [error] Can't open RFKILL control device
+[2026-11-19 10:41:57.652] [warning] Can't resolve nl80211 interface
+[2026-11-19 10:41:57.684] [info] Bar configured (width: 2000, height: 36) for output: WAYLAND-1

@@ -1,0 +1,35 @@
+== fake sysfs ==
+capacity=8
+status=Charging
+voltage_now=3649000
+max_brightness=100
+brightness=50
+== sysfs listing ==
+total 7
+drwx------   3 root root 3452 Nov 19 10:15 .
+drwxr-xr-x 141 root root    0 Nov 19 10:29 ..
+drwxr-xr-x   2 root root 3452 Nov 19 10:31 BAT0
+Battery
+total 7
+drwx------   3 root root 3452 Nov 19 10:15 .
+drwxr-xr-x 141 root root    0 Nov 19 10:29 ..
+drwxr-xr-x   2 root root 3452 Nov 19 10:31 alw_backlight
+== brightnessctl ==
+alw_backlight,backlight,50,50%
+set +10% ok
+alw_backlight,backlight,60,60%
+== wpctl ==
+Volume: 1.00
+Volume: 1.00
+Volume: 0.00 [MUTED]
+== pamixer ==
+100
+100
+== nmcli ==
+STATE         CONNECTIVITY  WIFI-HW  WIFI     WWAN-HW  WWAN
+connected  full       enabled  enabled  enabled  enabled
+no:
+== systemctl/loginctl ==
+ALW: 'poweroff' is handled by the Android host (no systemd in PRoot).
+ALW: 'terminate-session' is managed by the Android host (no systemd-logind in PRoot).
+== done ==

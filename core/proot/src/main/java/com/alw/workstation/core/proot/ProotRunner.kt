@@ -64,10 +64,20 @@ class ProotRunner(
         args.add(rootfsDir.absolutePath)
 
         // 4. Base system pseudo mounts
+        // Fake sysfs trees must be registered BEFORE /sys would shadow them in the
+        // rootfs; PRoot resolves a bind target through previously registered binds,
+        // and host /sys is SELinux-denied for the app UID (TASK-025).
+        fakeFsManager.materialize()
+        for (mount in fakeFsManager.getBindMounts().filter { it.guestPath?.startsWith("/sys/") == true }) {
+            args.add("-b")
+            args.add(mount.toCliArg())
+        }
+
         for (mount in defaultPseudoMounts) {
             args.add("-b")
             args.add(mount.toCliArg())
         }
+
 
         // Ensure guest rootfs /dev/pts exists for internal PTY allocation
         val guestDevPts = File(rootfsDir, "dev/pts")
@@ -130,6 +140,23 @@ class ProotRunner(
             args.add("$dmaHeapNode:/dev/dri/renderD128")
             if (!File(rootfsDir, "dev/dri").exists()) {
                 File(rootfsDir, "dev/dri").mkdirs()
+            }
+        }
+
+        // TASK-025: bind target directories for the fake sysfs trees. PRoot requires the
+        // destination path to exist inside the rootfs.
+        val guestSysDir = File(rootfsDir, "sys")
+        val guestSysClassDir = File(rootfsDir, "sys/class")
+        listOf("sys/class/power_supply", "sys/class/backlight").forEach { relative ->
+            val target = File(rootfsDir, relative)
+            if (!target.exists()) {
+                // The extracted rootfs keeps /sys read-only; temporarily unlock it so
+                // the PRoot bind targets can be created, then restore the mode.
+                if (guestSysDir.exists()) guestSysDir.setWritable(true, true)
+                if (guestSysClassDir.exists()) guestSysClassDir.setWritable(true, true)
+                target.mkdirs()
+                if (guestSysClassDir.exists()) guestSysClassDir.setWritable(false, false)
+                if (guestSysDir.exists()) guestSysDir.setWritable(false, false)
             }
         }
 

@@ -1,6 +1,8 @@
 package com.alw.workstation.ui.dashboard
 
+import android.content.Context
 import android.util.Log
+import android.view.Window
 import com.alw.workstation.bridge.wayland.audio.AudioBridgeManager
 import com.alw.workstation.bridge.wayland.input.InputProfile
 import com.alw.workstation.core.proot.RootfsExtractor
@@ -15,6 +17,7 @@ import com.alw.workstation.core.session.ProfileRepository
 import com.alw.workstation.core.session.SessionController
 import com.alw.workstation.core.session.SessionState
 import com.alw.workstation.core.session.model.StackProfile
+import com.alw.workstation.core.session.rice.RiceHostBridge
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,8 +46,11 @@ class DashboardViewModel(
     val shizukuManager: ShizukuCompanionManager? = null,
     val serverManager: com.alw.workstation.bridge.wayland.WaylandServerManager? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-    private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main
+    private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
+    private val appContext: Context? = null,
+    private val sessionWindowProvider: (() -> Window?)? = null
 ) {
+    private var riceHostBridge: RiceHostBridge? = null
 
     private val sessionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -180,6 +186,9 @@ class DashboardViewModel(
         // Start audio bridge and attach to session
         audioBridgeManager.coordinateWith(sessionController, runtimeDir, scope)
 
+        // TASK-025: expose battery / brightness / volume / network / open to guest rices.
+        startRiceHostBridge(runtimeDir)
+
         sessionController.updateState(SessionState.Running(profile, uptimeMillis = 0L))
         _uiState.update { it.copy(sessionState = SessionState.Running(profile, 0L)) }
 
@@ -195,11 +204,13 @@ class DashboardViewModel(
                 withContext(mainDispatcher) {
                     when (outcome) {
                         is CompositorOrchestrator.LaunchOutcome.Success -> {
+                            stopRiceHostBridge()
                             serverManager?.stopServer()
                             sessionController.stopSession()
                             refresh()
                         }
                         is CompositorOrchestrator.LaunchOutcome.FallbackTriggered -> {
+                            stopRiceHostBridge()
                             serverManager?.stopServer()
                             sessionController.stopSession()
                             _uiState.update {
@@ -213,6 +224,7 @@ class DashboardViewModel(
                             }
                         }
                         is CompositorOrchestrator.LaunchOutcome.Error -> {
+                            stopRiceHostBridge()
                             serverManager?.stopServer()
                             sessionController.updateState(SessionState.Error(outcome.message))
                             _uiState.update { it.copy(errorMessage = outcome.message) }
@@ -223,7 +235,30 @@ class DashboardViewModel(
         }
     }
 
+    private fun startRiceHostBridge(runtimeDir: File) {
+        stopRiceHostBridge()
+        val context = appContext ?: return
+        val bridge = RiceHostBridge(
+            context = context,
+            socketFile = File(runtimeDir, RiceHostBridge.SOCKET_NAME),
+            sysfsRoot = dirs.fakefsBaseDir,
+            windowProvider = sessionWindowProvider
+        )
+        try {
+            bridge.start()
+            riceHostBridge = bridge
+        } catch (e: Throwable) {
+            Log.w("ALW::Dashboard", "Rice host bridge start failed: ${e.message}")
+        }
+    }
+
+    private fun stopRiceHostBridge() {
+        riceHostBridge?.stop()
+        riceHostBridge = null
+    }
+
     fun stopSession() {
+        stopRiceHostBridge()
         serverManager?.stopServer()
         sessionController.stopSession()
         audioBridgeManager.stopAudioServer()
@@ -247,8 +282,8 @@ class DashboardViewModel(
                 execCommand = exec,
                 configMode = StackProfile.ConfigMode.WRAP_AND_OVERRIDE,
                 userConfigPath = "/home/${currentProfile.distro.defaultUser}/.config/hypr/hyprland.conf",
-                sessionConfigPath = "/tmp/android-session.conf",
-                extraArgs = listOf("-c", "/tmp/android-session.conf", "--i-am-really-stupid")
+                sessionConfigPath = "/tmp/android-session.lua",
+                extraArgs = listOf("-c", "/tmp/android-session.lua", "--i-am-really-stupid")
             )
         } else {
             currentProfile.compositor.copy(

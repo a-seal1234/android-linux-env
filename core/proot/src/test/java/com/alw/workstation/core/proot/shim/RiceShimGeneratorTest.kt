@@ -37,7 +37,12 @@ class RiceShimGeneratorTest {
             "fakeroot",
             "makepkg",
             "sudo",
-            "xdg-open"
+            "xdg-open",
+            "alw-host-query",
+            "brightnessctl",
+            "wpctl",
+            "pamixer",
+            "nmcli"
         )
 
         for (shimName in expectedShims) {
@@ -57,6 +62,47 @@ class RiceShimGeneratorTest {
         val sessionContent = RiceShimGenerator.PLASMA_SESSION_START_SHIM
         assertTrue(sessionContent.contains("plasmashell &"))
         assertTrue(sessionContent.contains("konsole"))
+    }
+
+    @Test
+    fun testRiceHostShimsContent() {
+        val query = RiceShimGenerator.ALW_HOST_QUERY_SHIM
+        assertTrue(query.contains("/alw-host.sock"))
+        assertTrue(query.contains("python3"))
+        assertTrue(query.contains("AF_UNIX"))
+
+        val brightness = RiceShimGenerator.BRIGHTNESSCTL_SHIM
+        assertTrue(brightness.contains("/sys/class/backlight/alw_backlight"))
+        assertTrue(brightness.contains("alw-host-query \"brightness set"))
+        assertTrue(brightness.contains("alw_backlight,backlight,"))
+        assertTrue(brightness.contains("max)"))
+
+        val wpctl = RiceShimGenerator.WPCTL_SHIM
+        assertTrue(wpctl.contains("get-volume"))
+        assertTrue(wpctl.contains("[MUTED]"))
+        assertTrue(wpctl.contains("set-mute"))
+        assertTrue(wpctl.contains("alw-host-query \"volume"))
+
+        val pamixer = RiceShimGenerator.PAMIXER_SHIM
+        assertTrue(pamixer.contains("--get-volume"))
+        assertTrue(pamixer.contains("--get-mute"))
+        assertTrue(pamixer.contains("volume step"))
+
+        val nmcli = RiceShimGenerator.NMCLI_SHIM
+        assertTrue(nmcli.contains("alw-host-query \"network\""))
+        assertTrue(nmcli.contains("yes:\$SSID"))
+        assertTrue(nmcli.contains("STATE"))
+
+        val xdgOpen = RiceShimGenerator.XDG_OPEN_SHIM
+        assertTrue(xdgOpen.contains("alw-host-query \"open"))
+    }
+
+    @Test
+    fun testSystemctlShimHandlesPowerVerbs() {
+        val content = RiceShimGenerator.SYSTEMCTL_SHIM
+        assertTrue(content.contains("poweroff|reboot|suspend|hibernate"))
+        assertTrue(content.contains("is-system-running"))
+        assertTrue(content.contains("handled by the Android host"))
     }
 
     @Test

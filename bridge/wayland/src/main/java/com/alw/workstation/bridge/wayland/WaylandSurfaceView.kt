@@ -9,7 +9,6 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.PointerIcon
 import android.view.SurfaceHolder
-import android.view.Choreographer
 import android.view.SurfaceView
 import com.alw.workstation.bridge.wayland.input.DefaultMotionEventStylusProvider
 import com.alw.workstation.bridge.wayland.input.InputProfile
@@ -32,27 +31,6 @@ class WaylandSurfaceView @JvmOverloads constructor(
             value?.inputProfile = inputProfile
             applyInputProfile(inputProfile)
         }
-
-    private var vsyncLoopActive = false
-
-    private val vsyncCallback = object : Choreographer.FrameCallback {
-        override fun doFrame(frameTimeNanos: Long) {
-            if (!vsyncLoopActive) return
-            serverManager?.notifyVsync(frameTimeNanos)
-            Choreographer.getInstance().postFrameCallback(this)
-        }
-    }
-
-    private fun startVsyncLoop() {
-        if (vsyncLoopActive) return
-        vsyncLoopActive = true
-        Choreographer.getInstance().postFrameCallback(vsyncCallback)
-    }
-
-    private fun stopVsyncLoop() {
-        vsyncLoopActive = false
-        Choreographer.getInstance().removeFrameCallback(vsyncCallback)
-    }
 
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = Unit
@@ -109,7 +87,6 @@ class WaylandSurfaceView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         displayManager?.unregisterDisplayListener(displayListener)
-        stopVsyncLoop()
         super.onDetachedFromWindow()
     }
 
@@ -134,7 +111,6 @@ class WaylandSurfaceView @JvmOverloads constructor(
     override fun surfaceCreated(holder: SurfaceHolder) {
         display?.let { pushRefreshRate(it, applySurfaceFrameRate = true) }
         serverManager?.attachSurface(holder.surface)
-        startVsyncLoop()
         if (hasWindowFocus()) {
             applyInputProfile(inputProfile)
         }
@@ -147,7 +123,6 @@ class WaylandSurfaceView @JvmOverloads constructor(
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
-        stopVsyncLoop()
         serverManager?.detachSurface()
     }
 

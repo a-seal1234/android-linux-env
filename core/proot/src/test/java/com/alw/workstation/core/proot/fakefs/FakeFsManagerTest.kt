@@ -22,6 +22,25 @@ class FakeFsManagerTest {
     }
 
     @Test
+    fun testMaterializeCreatesFakeSysfsNodes() {
+        val manager = FakeFsManager(baseDir)
+        manager.materialize()
+
+        assertTrue(manager.sysPowerSupplyDir.isDirectory)
+        listOf("capacity", "status", "present", "type", "voltage_now", "current_now").forEach {
+            assertTrue("BAT0/$it must exist", File(manager.sysPowerSupplyDir, it).isFile)
+        }
+        assertEquals("Discharging", File(manager.sysPowerSupplyDir, "status").readText().trim())
+
+        assertTrue(manager.sysBacklightDir.isDirectory)
+        assertEquals("100", File(manager.sysBacklightDir, "max_brightness").readText().trim())
+
+        val mounts = manager.getBindMounts()
+        assertTrue(mounts.any { it.guestPath == "/sys/class/power_supply" })
+        assertTrue(mounts.any { it.guestPath == "/sys/class/backlight" })
+    }
+
+    @Test
     fun testMaterializeCreatesAllDirectoriesAndFiles() {
         val manager = FakeFsManager(baseDir)
         manager.materialize()

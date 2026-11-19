@@ -584,9 +584,6 @@ public:
 
     float getRefreshRate() const { return m_refreshRateHz.load(); }
 
-    // Called from JNI on the Android main thread for every host VSync.
-    void notifyVsync(int64_t frameTimeNanos) { onVsync(frameTimeNanos); }
-
     bool isRunning() const { return m_running.load(); }
     int getActiveClientsCount() const { return m_activeClients.load(); }
 
@@ -1345,6 +1342,15 @@ private:
             desc.usage = AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN;
             desc.stride = static_cast<uint32_t>(buffer->width);
 
+            // HyperOS' vendor gralloc can crash inside SnapAllocCore::Retain() when it
+            // imports a PRoot-emulated dma-buf handle (observed on the Xiaomi Pad 8),
+            // which kills the whole app. The linear mmap path renders the same buffers
+            // correctly, so the vendor import is strictly opt-in.
+            static const bool s_enableAhbImport = []() {
+                const char* value = getenv("ALW_DMABUF_AHB");
+                return value != nullptr && value[0] == '1';
+            }();
+
             AHardwareBuffer* ahb = nullptr;
             // AHardwareBuffer_createFromHandle() is a platform (libandroid) API, not NDK:
             // resolve it at runtime; if unavailable the mmap fallback is used.
@@ -1358,7 +1364,7 @@ private:
             }();
 
             int rc = -1;
-            if (s_createFromHandle != nullptr) {
+            if (s_enableAhbImport && s_createFromHandle != nullptr) {
                 rc = s_createFromHandle(
                     &desc, reinterpret_cast<const void*>(&rawHandle),
                     AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN, &ahb);
@@ -2419,6 +2425,135 @@ WaylandSurfaceServer* getServer() {
 
 } // namespace
 
+// Creates a bound + listening AF_UNIX SOCK_STREAM socket for the rice host bridge
+// (TASK-025). Android's public API cannot bind a filesystem sun_path.
+static std::atomic<int> s_riceServerFd{-1};
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_alw_workstation_core_session_rice_RiceHostBridge_nativeCreateUnixServer(
+    JNIEnv* env,
+    jobject thiz,
+    jstring path
+) {
+    (void) thiz;
+    if (path == nullptr)
+        return -EINVAL;
+
+    const char* rawPath = env->GetStringUTFChars(path, nullptr);
+    if (rawPath == nullptr)
+        return -ENOMEM;
+
+    struct sockaddr_un address;
+    std::memset(&address, 0, sizeof(address));
+    address.sun_family = AF_UNIX;
+
+    int result;
+    if (std::strlen(rawPath) >= sizeof(address.sun_path)) {
+        result = -ENAMETOOLONG;
+    } else {
+        std::strncpy(address.sun_path, rawPath, sizeof(address.sun_path) - 1);
+        unlink(rawPath);
+
+        int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        if (fd < 0) {
+            result = -errno;
+        } else if (bind(fd, reinterpret_cast<struct sockaddr*>(&address), sizeof(address)) < 0) {
+            result = -errno;
+            close(fd);
+        } else if (listen(fd, 8) < 0) {
+            result = -errno;
+            close(fd);
+        } else {
+            result = fd;
+            s_riceServerFd.store(fd);
+            LOGI("Rice host socket bound at %s (fd %d)", rawPath, fd);
+        }
+    }
+
+    env->ReleaseStringUTFChars(path, rawPath);
+    return result;
+}
+
+// --- Rice host bridge transport (TASK-025) ------------------------------
+// Android's LocalServerSocket cannot reliably accept on a natively bound
+// filesystem fd (ART crashes inside Linux_accept), so accept/read/write are
+// done here and only plain fds cross the JNI boundary.
+extern "C" JNIEXPORT jint JNICALL
+Java_com_alw_workstation_core_session_rice_RiceHostBridge_nativeAccept(
+    JNIEnv* env,
+    jobject thiz
+) {
+    (void) env;
+    (void) thiz;
+    int server = s_riceServerFd.load();
+    if (server < 0)
+        return -EBADF;
+    int client = accept4(server, nullptr, nullptr, SOCK_CLOEXEC);
+    if (client < 0)
+        return -errno;
+    return client;
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_alw_workstation_core_session_rice_RiceHostBridge_nativeReadLine(
+    JNIEnv* env,
+    jobject thiz,
+    jint fd
+) {
+    (void) thiz;
+    std::string line;
+    line.reserve(256);
+    char ch = 0;
+    while (line.size() < 4096) {
+        ssize_t n = read(fd, &ch, 1);
+        if (n <= 0)
+            break;
+        if (ch == '\n')
+            break;
+        line.push_back(ch);
+    }
+    jbyteArray result = env->NewByteArray(static_cast<jsize>(line.size()));
+    if (result != nullptr && !line.empty())
+        env->SetByteArrayRegion(result, 0, static_cast<jsize>(line.size()),
+                                reinterpret_cast<const jbyte*>(line.data()));
+    return result;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_alw_workstation_core_session_rice_RiceHostBridge_nativeWriteFd(
+    JNIEnv* env,
+    jobject thiz,
+    jint fd,
+    jbyteArray data
+) {
+    (void) thiz;
+    if (data == nullptr)
+        return -EINVAL;
+    const jsize len = env->GetArrayLength(data);
+    std::vector<jbyte> buffer(static_cast<size_t>(len));
+    env->GetByteArrayRegion(data, 0, len, buffer.data());
+    size_t written = 0;
+    while (written < buffer.size()) {
+        ssize_t n = send(fd, buffer.data() + written, buffer.size() - written, MSG_NOSIGNAL);
+        if (n <= 0)
+            return -errno;
+        written += static_cast<size_t>(n);
+    }
+    return static_cast<jint>(written);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_alw_workstation_core_session_rice_RiceHostBridge_nativeCloseFd(
+    JNIEnv* env,
+    jobject thiz,
+    jint fd
+) {
+    (void) env;
+    (void) thiz;
+    if (fd >= 0)
+        close(fd);
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeInitServer(
     JNIEnv* env,
@@ -2451,17 +2586,6 @@ Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSetSurface(
     } else {
         getServer()->setNativeWindow(nullptr);
     }
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeOnVsync(
-    JNIEnv* env,
-    jobject thiz,
-    jlong frameTimeNanos
-) {
-    (void) env;
-    (void) thiz;
-    getServer()->notifyVsync(static_cast<int64_t>(frameTimeNanos));
 }
 
 extern "C" JNIEXPORT void JNICALL

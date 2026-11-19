@@ -1,0 +1,9 @@
+* { font-family: monospace; font-size: 15px; }
+window#waybar { background: rgba(16, 18, 24, 0.85); color: #d8dee9; }
+#custom-alw { padding: 0 12px; color: #8fbcbb; font-weight: bold; }
+#clock, #battery, #backlight, #network, #pulseaudio { padding: 0 12px; }
+#battery.charging { color: #a3be8c; }
+#battery.warning { color: #ebcb8b; }
+#battery.critical { color: #bf616a; }
+#network.disconnected { color: #bf616a; }
+#pulseaudio.muted { color: #bf616a; }

@@ -67,6 +67,8 @@ object ConfigSynthesizer {
             appendLine()
             appendLine("hl.on(\"hyprland.start\", function()")
             appendLine("    hl.exec_cmd(\"konsole --hold -e /bin/bash -c 'fastfetch; exec bash'\")")
+            appendLine("    -- Optional post-start hook (TASK-025): runs only if present.")
+            appendLine("    hl.exec_cmd(\"sh -c 'test -x /root/alw-session-hook.sh && /root/alw-session-hook.sh > /tmp/rt/alw-session-hook.log 2>&1'\")")
             appendLine("end)")
         }
     }

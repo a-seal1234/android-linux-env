@@ -1,0 +1,26 @@
+{
+  "layer": "top",
+  "position": "top",
+  "height": 36,
+  "margin-top": 4,
+  "modules-left": ["custom/alw"],
+  "modules-center": ["clock"],
+  "modules-right": ["pulseaudio", "network", "battery"],
+  "custom/alw": { "format": "ALW rice", "tooltip": false },
+  "clock": { "format": "{:%H:%M  %a %d %b}", "tooltip-format": "{calendar}" },
+  "backlight": { "device": "alw_backlight", "format": "☀ {percent}%", "interval": 2 },
+  "battery": {
+    "bat": "BAT0",
+    "interval": 5,
+    "format": "{capacity}%",
+    "states": { "warning": 20, "critical": 10 }
+  },
+  "network": {
+    "interval": 5,
+    "format-wifi": " {essid} {signalStrength}%",
+    "format-ethernet": "󰈀 {ipaddr}",
+    "format-disconnected": "⚠ offline",
+    "tooltip-format-wifi": "{essid} ({signalStrength}%) {ipaddr}"
+  },
+  "pulseaudio": { "format": "{icon} {volume}%", "format-muted": " {volume}%", "format-icons": { "default": ["", "", ""] } }
+}
