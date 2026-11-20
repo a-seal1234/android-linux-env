@@ -120,7 +120,7 @@ planting), and a full Firefox launch → force-kill Firefox → rice survives. E
   limited to the existing `stop()`/lock-release path; board-coordinate before editing.
 - **Aggressive cleanup killing the Terminal session** → `Close All Sessions` is explicit
   (button), and the silent auto-clean path is restricted to the desktop-session process set from
-  TASK-037 (`kitty`/`bash` spared).
+  TASK-038 (`kitty`/`bash` spared).
 - **Resume path attaching to a half-dead server** → the probe requires
   `serverManager.isRunning()` AND a live socket; otherwise fall through to auto-clean.
 - **Firefox hardening may regress other guests** → env scoped to the Firefox launch
