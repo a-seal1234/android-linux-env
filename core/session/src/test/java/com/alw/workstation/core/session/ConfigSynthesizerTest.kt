@@ -97,6 +97,25 @@ class ConfigSynthesizerTest {
     }
 
     @Test
+    fun testContinuousRenderingIsOptInForMeasurement() {
+        val base = StackProfile.defaultArchXiaomiPad8()
+
+        // Default: VFR stays on (compositor only presents on damage).
+        val defaultConfig = ConfigSynthesizer.synthesizeHyprlandSessionConfig(base)
+        assertFalse(defaultConfig.contains("vfr = false"))
+
+        // Opt-in via the profile env override used by the gate measurement.
+        val forced = base.copy(
+            gpu = base.gpu.copy(
+                environmentOverrides = mapOf("ALW_FORCE_CONTINUOUS" to "1")
+            )
+        )
+        assertTrue(
+            ConfigSynthesizer.synthesizeHyprlandSessionConfig(forced).contains("vfr = false")
+        )
+    }
+
+    @Test
     fun testSynthesizeImportsHostLuaConfigBeforeOverrides() {
         val profile = StackProfile.defaultArchXiaomiPad8()
         val config = ConfigSynthesizer.synthesizeHyprlandSessionConfig(profile)
