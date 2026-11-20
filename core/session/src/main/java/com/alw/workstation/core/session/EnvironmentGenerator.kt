@@ -79,7 +79,7 @@ object EnvironmentGenerator {
                 env["VK_DRIVER_FILES"] = icdPath
                 env["MESA_LOADER_DRIVER_OVERRIDE"] = "zink"
                 env["GALLIUM_DRIVER"] = "zink"
-                env["TU_DEBUG"] = "noconform"
+                env["TU_DEBUG"] = "noconform,noubwc"
                 // Aquamarine/EGL advertises GLES via Zink; expose the GL 4.6 surface level
                 env["MESA_GL_VERSION_OVERRIDE"] = "4.6"
             }
@@ -148,12 +148,12 @@ object EnvironmentGenerator {
                 val packagedIcd = "/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json"
                 env["VK_ICD_FILENAMES"] = packagedIcd
                 env["VK_DRIVER_FILES"] = packagedIcd
-                env["TU_DEBUG"] = env["TU_DEBUG"] ?: "noconform"
+                env["TU_DEBUG"] = env["TU_DEBUG"] ?: "noconform,noubwc"
                 env["MESA_VK_WSI_PRESENT_MODE"] = "immediate"
                 env["LIBGL_ALWAYS_SOFTWARE"] = "0"
             }
             StackProfile.DriverMode.ADRENO_PROPRIETARY_ZINK -> {
-                env["TU_DEBUG"] = env["TU_DEBUG"] ?: "noconform"
+                env["TU_DEBUG"] = env["TU_DEBUG"] ?: "noconform,noubwc"
                 env["MESA_VK_WSI_PRESENT_MODE"] = "immediate"
             }
             else -> Unit

@@ -247,7 +247,7 @@ export VK_DRIVER_FILES="${'$'}{VK_DRIVER_FILES:-${'$'}VK_ICD_FILENAMES}"
 export MESA_LOADER_DRIVER_OVERRIDE=zink
 export GALLIUM_DRIVER=zink
 export LIBGL_ALWAYS_SOFTWARE=0
-export TU_DEBUG="${'$'}{TU_DEBUG:-noconform}"
+export TU_DEBUG="${'$'}{TU_DEBUG:-noconform,noubwc}"
 export MESA_VK_WSI_PRESENT_MODE="${'$'}{MESA_VK_WSI_PRESENT_MODE:-immediate}"
 export MESA_GL_VERSION_OVERRIDE="${'$'}{MESA_GL_VERSION_OVERRIDE:-4.6}"
 
@@ -297,9 +297,12 @@ export VK_DRIVER_FILES="${'$'}{VK_DRIVER_FILES:-${'$'}VK_ICD_FILENAMES}"
 export MESA_LOADER_DRIVER_OVERRIDE=zink
 export GALLIUM_DRIVER=zink
 export LIBGL_ALWAYS_SOFTWARE=0
-export TU_DEBUG="${'$'}{TU_DEBUG:-noconform}"
+export TU_DEBUG="${'$'}{TU_DEBUG:-noconform,noubwc}"
 export MESA_VK_WSI_PRESENT_MODE="${'$'}{MESA_VK_WSI_PRESENT_MODE:-immediate}"
 export MESA_GL_VERSION_OVERRIDE="${'$'}{MESA_GL_VERSION_OVERRIDE:-4.6}"
+# TASK-035: Quickshell (Qt6 QML) must finish FBO rendering synchronously before
+# commit — the threaded render loop + Explicit Sync fences artifact on Turnip/Zink.
+export QSG_RENDER_LOOP="${'$'}{QSG_RENDER_LOOP:-basic}"
 
 exec "${'$'}@"
 """
@@ -573,7 +576,7 @@ else
     export MESA_LOADER_DRIVER_OVERRIDE=zink
     export GALLIUM_DRIVER=zink
     export LIBGL_ALWAYS_SOFTWARE=0
-    export TU_DEBUG="${'$'}{TU_DEBUG:-noconform}"
+    export TU_DEBUG="${'$'}{TU_DEBUG:-noconform,noubwc}"
     export MESA_VK_WSI_PRESENT_MODE="${'$'}{MESA_VK_WSI_PRESENT_MODE:-immediate}"
     export MESA_GL_VERSION_OVERRIDE="${'$'}{MESA_GL_VERSION_OVERRIDE:-4.6}"
 
@@ -635,7 +638,7 @@ export VK_DRIVER_FILES="${'$'}{VK_DRIVER_FILES:-${'$'}VK_ICD_FILENAMES}"
 export MESA_LOADER_DRIVER_OVERRIDE=zink
 export GALLIUM_DRIVER=zink
 export LIBGL_ALWAYS_SOFTWARE=0
-export TU_DEBUG="${'$'}{TU_DEBUG:-noconform}"
+export TU_DEBUG="${'$'}{TU_DEBUG:-noconform,noubwc}"
 export MESA_VK_WSI_PRESENT_MODE="${'$'}{MESA_VK_WSI_PRESENT_MODE:-immediate}"
 export MESA_GL_VERSION_OVERRIDE="${'$'}{MESA_GL_VERSION_OVERRIDE:-4.6}"
 

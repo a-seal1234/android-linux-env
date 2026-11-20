@@ -97,21 +97,33 @@ class ConfigSynthesizerTest {
     }
 
     @Test
-    fun testContinuousRenderingIsOptInForMeasurement() {
+    fun testContinuousRenderingAidIsRemoved() {
         val base = StackProfile.defaultArchXiaomiPad8()
 
-        // Default: VFR stays on (compositor only presents on damage).
-        val defaultConfig = ConfigSynthesizer.synthesizeHyprlandSessionConfig(base)
-        assertFalse(defaultConfig.contains("vfr = false"))
-
-        // Opt-in via the profile env override used by the gate measurement.
+        // TASK-035: the `misc:vfr = false` measurement aid is gone — Hyprland 0.57
+        // rejects the key ("unknown config key 'misc.vfr'") and the compositor
+        // presents damage-driven regardless, so it must never be emitted again,
+        // not even for the ALW_FORCE_CONTINUOUS gate measurement opt-in.
         val forced = base.copy(
             gpu = base.gpu.copy(
                 environmentOverrides = mapOf("ALW_FORCE_CONTINUOUS" to "1")
             )
         )
+        val config = ConfigSynthesizer.synthesizeHyprlandSessionConfig(forced)
+        assertFalse(config.contains("vfr"))
+    }
+
+    @Test
+    fun testQuickshellLayerRuleDisablesBlur() {
+        val config = ConfigSynthesizer.synthesizeHyprlandSessionConfig(
+            StackProfile.defaultArchXiaomiPad8()
+        )
+        // TASK-035: the qs overlay layer keeps cheap damage (no blur, popups included).
         assertTrue(
-            ConfigSynthesizer.synthesizeHyprlandSessionConfig(forced).contains("vfr = false")
+            config.contains(
+                "hl.layer_rule({ match = { namespace = \"quickshell\" }, " +
+                    "blur = false, blur_popups = false })"
+            )
         )
     }
 

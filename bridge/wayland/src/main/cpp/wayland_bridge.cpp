@@ -48,6 +48,9 @@
 #define DRM_FORMAT_ARGB8888 0x34325241u
 #define DRM_FORMAT_XRGB8888 0x34325258u
 #define DRM_FORMAT_MOD_LINEAR 0x0000000000000000ull
+/* Legacy "unspecified/implicit" modifier: accepted on import for v1-era clients,
+ * never advertised by the bridge. */
+#define DRM_FORMAT_MOD_INVALID 0x00ffffffffffffffull
 /* Android virtual render node advertised as the linux-dmabuf main device */
 #define ALW_VIRTUAL_DRM_DEV makedev(226, 128)
 
@@ -275,6 +278,10 @@ struct ClientSurface {
     bool isCursor = false;
     bool isXdgSurface = false;
     bool enteredOutput = false;
+    // TASK-035: map/unmap/resize transitions force a clean full-frame upload.
+    bool mapped = false;
+    int32_t lastBufWidth = 0;
+    int32_t lastBufHeight = 0;
 };
 
 struct XdgPositioner {
@@ -823,26 +830,33 @@ public:
         if (!eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext))
             return false;
 
-        if (m_glTexWidth != width || m_glTexHeight != height) {
+        if (m_fullFrameUploadPending || m_glTexWidth != width || m_glTexHeight != height) {
             glBindTexture(GL_TEXTURE_2D, m_glTexture);
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
                          GL_UNSIGNED_BYTE, nullptr);
             m_glTexWidth = width;
             m_glTexHeight = height;
+            m_fullFrameUploadPending = false;
         }
 
         // GLES2 has no UNPACK_ROW_LENGTH; the guest buffers are tightly packed
         // (stride == width * 4). Anything else keeps the CPU path for correctness.
         // Guest buffers are padded to 64 bytes (stride 9728 for a 2400 px row).
-        // GL_EXT_unpack_subimage lets the driver honour that row length directly.
+        // TASK-035: the Adreno ES driver does NOT honour GL_UNPACK_ROW_LENGTH here
+        // (measured: the 2400x1602/stride-9728 overlay sheared into diagonal tiles),
+        // so padded rows are repacked to a tight stride instead of trusting the
+        // pixel-store state.
+        std::vector<uint8_t> repacked;
+        const uint8_t* upload = src;
         if (stride != width * 4) {
-            if (!m_glEs3) {
-                static int s_strideLog = 0;
-                if (++s_strideLog <= 5)
-                    LOGW("GLES: padded stride %d needs ES3", stride);
-                return false;
+            const size_t rowBytes = static_cast<size_t>(width) * 4;
+            repacked.resize(rowBytes * static_cast<size_t>(height));
+            for (int y = 0; y < height; ++y) {
+                memcpy(repacked.data() + y * rowBytes,
+                       src + static_cast<size_t>(y) * stride, rowBytes);
             }
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 4);
+            upload = repacked.data();
+            if (m_glEs3) glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
         } else if (m_glEs3) {
             glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
         }
@@ -853,7 +867,7 @@ public:
         // GL_RGBA keeps the upload on a core format and the fragment shader swizzles.
         const auto tUploadStart = std::chrono::steady_clock::now();
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA,
-                        GL_UNSIGNED_BYTE, src);
+                        GL_UNSIGNED_BYTE, upload);
         // Force the upload to complete so the timing is real, not just queued.
         glFinish();
         const auto tUploadEnd = std::chrono::steady_clock::now();
@@ -2317,6 +2331,19 @@ private:
             return false;
         }
 
+        // TASK-035: only linear (or legacy-unspecified) dma-bufs can be read back on
+        // the CPU. A UBWC/tiled buffer read linearly shows the repeating macro-tile
+        // artifact captured on the Adreno overlay — reject it instead of presenting
+        // corruption. The bridge advertises LINEAR-only and guests set TU_DEBUG=noubwc,
+        // so this only fires on misbehaving clients.
+        if (plane.modifier != DRM_FORMAT_MOD_LINEAR &&
+            plane.modifier != DRM_FORMAT_MOD_INVALID) {
+            LOGE("dmabuf: rejecting non-linear modifier 0x%016llx (UBWC/tiled) — "
+                 "guests must allocate linear (TU_DEBUG=noubwc)",
+                 static_cast<unsigned long long>(plane.modifier));
+            return false;
+        }
+
         // Zero-copy first (TASK-029): import the plane as an AHardwareBuffer, wrap it
         // in an EGLImage and sample it directly on the Adreno 825. Every failure mode
         // (probe miss, gralloc rejection, stride/offset the adapter cannot represent,
@@ -2800,8 +2827,24 @@ private:
                      surface.frameCallbacks.size(), surface.isXdgSurface ? 1 : 0,
                      surface.isCursor ? 1 : 0);
                 sendSurfaceEnterIfNeeded(client, surface);
+                const bool mapped = surface.attachedBufferId > 0;
+                int32_t attachW = 0, attachH = 0;
+                auto dbIt = client.dmabufBuffers.find(surface.attachedBufferId);
+                if (mapped && dbIt != client.dmabufBuffers.end()) {
+                    attachW = dbIt->second->width;
+                    attachH = dbIt->second->height;
+                }
+                // TASK-035: a surface mapped, unmapped or resized changes the
+                // composition — the next present does a clean full-frame upload.
+                if (mapped != surface.mapped ||
+                    (mapped && (attachW != surface.lastBufWidth ||
+                                attachH != surface.lastBufHeight))) {
+                    m_fullFrameUploadPending = true;
+                }
+                surface.mapped = mapped;
+                surface.lastBufWidth = attachW;
+                surface.lastBufHeight = attachH;
                 if (surface.attachedBufferId > 0) {
-                    auto dbIt = client.dmabufBuffers.find(surface.attachedBufferId);
                     if (dbIt != client.dmabufBuffers.end()) {
                         const auto& dbuf = dbIt->second;
                         bool isMainSurface = surface.isXdgSurface
@@ -3478,6 +3521,10 @@ private:
     GLint m_glSampler = -1;
     int m_glTexWidth = 0;
     int m_glTexHeight = 0;
+    // TASK-035: set when a surface maps, unmaps or resizes (or on the first frame
+    // after ensureGlPresenter()); forces a clean full-frame (0,0,srcW,srcH) upload
+    // so stale regions can never survive a composition change.
+    bool m_fullFrameUploadPending = true;
     bool m_glTried = false;
     bool m_glReady = false;
     bool m_glEs3 = false;

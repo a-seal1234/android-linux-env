@@ -150,15 +150,30 @@ class WaylandSurfaceView @JvmOverloads constructor(
         super.onDetachedFromWindow()
     }
 
+    /**
+     * Session refresh rate pinned by the session host (0 = follow the panel).
+     * A fixed rate also makes the native pacer run a clocked 144 Hz cadence instead
+     * of only forwarding live VSync ticks.
+     */
+    @Volatile
+    var forcedRefreshRateHz: Float = 0f
+
     private fun pushRefreshRate(display: Display, applySurfaceFrameRate: Boolean = false) {
-        val hz = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display.refreshRate else 60f
+        val panelHz = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display.refreshRate else 60f
+        val hz = if (forcedRefreshRateHz > 0f) forcedRefreshRateHz else panelHz
         serverManager?.setRefreshRate(hz)
         if (!applySurfaceFrameRate || !holder.surface.isValid) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             runCatching {
-                holder.surface.setFrameRate(hz, android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+                holder.surface.setFrameRate(hz, android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)
             }
         }
+    }
+
+    /** Called by the session screen when the profile's refresh rate changes. */
+    fun applyForcedRefreshRate(rateHz: Float) {
+        forcedRefreshRateHz = rateHz
+        display?.let { pushRefreshRate(it, applySurfaceFrameRate = true) }
     }
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {

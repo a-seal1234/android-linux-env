@@ -214,12 +214,33 @@ class MainActivity : ComponentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    /**
+     * Pins the host panel to the session refresh rate.
+     *
+     * `preferredRefreshRate` is only a hint and HyperOS keeps the panel on its 60 Hz
+     * default (verified: `dumpsys display` reported modeId 4 while the session ran).
+     * `preferredDisplayModeId` is the binding switch, so resolve the display mode whose
+     * fps matches the requested rate and select it. 0 Hz restores the default mode.
+     */
     private fun setSessionRefreshRate(rateHz: Float) {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-            val params = window.attributes
-            params.preferredRefreshRate = rateHz
-            window.attributes = params
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) return
+        val params = window.attributes
+        params.preferredRefreshRate = rateHz
+        val display = window.decorView.display ?: return
+        val target = if (rateHz > 0f) {
+            display.supportedModes
+                .filter { kotlin.math.abs(it.refreshRate - rateHz) < 1f }
+                .minByOrNull { it.modeId }
+        } else {
+            null
         }
+        params.preferredDisplayModeId = target?.modeId ?: 0
+        window.attributes = params
+        android.util.Log.i(
+            "ALW::RefreshRate",
+            "preferredDisplayModeId=${params.preferredDisplayModeId} " +
+                "(modes=${display.supportedModes.joinToString { "${it.modeId}:${it.refreshRate.toInt()}Hz" }})"
+        )
     }
 
     private fun startWorkstationService() {

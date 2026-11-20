@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.alw.workstation.bridge.wayland.InputDispatcher
@@ -35,6 +36,29 @@ fun SessionSurfaceScreen(
 ) {
     val state by dashboardViewModel.uiState.collectAsState()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val hostWindow = (LocalView.current.context as? android.app.Activity)?.window
+
+    // TASK-035 immersive mode: the guest desktop owns the whole panel while a
+    // session is on screen. Transient bars come back on a swipe and are hidden
+    // again, never leaving a stale inset behind on exit.
+    DisposableEffect(Unit) {
+        val window = hostWindow
+        val controller = window?.let {
+            androidx.core.view.WindowInsetsControllerCompat(it, it.decorView)
+        }
+        if (window != null) {
+            androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+            controller?.apply {
+                systemBarsBehavior =
+                    androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            }
+        }
+        onDispose {
+            controller?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            window?.let { androidx.core.view.WindowCompat.setDecorFitsSystemWindows(it, true) }
+        }
+    }
 
     Box(
         modifier = Modifier.fillMaxSize()
@@ -47,6 +71,19 @@ fun SessionSurfaceScreen(
                     this.serverManager = serverManager
                     this.inputDispatcher = inputDispatcher
                     this.inputProfile = state.inputProfile
+                    this.applyForcedRefreshRate(
+                        state.activeProfile?.display?.refreshRateHz?.toFloat() ?: 0f
+                    )
+                    // Hide the bars as soon as the surface's window exists too; the
+                    // activity-level effect above can run before the window is attached.
+                    this.viewTreeObserver.addOnWindowFocusChangeListener { focused ->
+                        if (focused) {
+                            (context as? android.app.Activity)?.window?.let { w ->
+                                androidx.core.view.WindowInsetsControllerCompat(w, w.decorView)
+                                    .hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                            }
+                        }
+                    }
                 }
             },
             update = { surfaceView ->

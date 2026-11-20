@@ -77,14 +77,39 @@ windows open/close and the render scale changes; verify artifact-free presentati
 evidence in `docs/tasks/TASK-035/evidence/` (screenshots + presenter log lines showing the
 forced full uploads at the trigger points).
 
+**Phase 2b — measured root cause correction (2026-11-20, after first on-device pass).** The
+first implementation (LINEAR-only advertisement + `TU_DEBUG=noubwc` + `QSG_RENDER_LOOP=basic`)
+did **not** remove the overlay artifact, and the log trailer disproved the UBWC hypothesis: the
+mmap fallback rows were `3200x2136 stride=12800` (tight), no `rejecting non-linear modifier`
+line ever fired, and forcing the CPU path (`debug.alw.gles_blit=0`) rendered the overlay
+**pixel-perfect**. The actual defect is in the **GPU upload**: guests commit a padded overlay
+buffer (`2400x1602 stride=9728`, i.e. 2400*4 + 128) and the Adreno ES driver does not honour
+`GL_UNPACK_ROW_LENGTH`, which produced exactly the observed diagonal tile shear.
+Fix: `presentWithGl()` repacks padded rows into a tight buffer before `glTexSubImage2D`
+(`GL_UNPACK_ALIGNMENT=4`, `GL_UNPACK_ROW_LENGTH=0`). The LINEAR-only advertisement and the
+non-linear import guard are kept as defence-in-depth.
+
+**Phase 2c — forced 144 Hz VSync.** `dumpsys display` showed the panel pinned at mode 4 (60 Hz)
+while a session ran: `preferredRefreshRate` is only a hint on HyperOS. `MainActivity` now
+resolves the `supportedModes` entry matching the profile's `refreshRateHz` and sets
+`preferredDisplayModeId` (mode 2 = 2136x3200@144) in the session window attributes on start and
+restores mode 0 on stop; `WaylandSurfaceView.applyForcedRefreshRate()` pins the surface with
+`setFrameRate(hz, FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)` and feeds the native pacer the same
+rate so the compositor cadence matches the panel.
+
+**Phase 2d — immersive focus mode.** `SessionSurfaceScreen` hides the Android status/navigation
+bars for the session lifetime (`WindowCompat.setDecorFitsSystemWindows(false)` +
+`WindowInsetsControllerCompat.hide(systemBars)`, `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`) and
+restores them on dispose, re-hiding after a swipe-reveal.
+
 ## 4. Acceptance Criteria
 
 | Criterion | Description | Status |
 |---|---|---|
 | **AC-01** | Task registered with architecture, phases and AC table | **Done** |
-| **AC-02** | Bridge forces a clean full-frame upload on dimension change, presenter re-init and surface map/unmap/resize; pixel-store state enforced on every upload | Planned |
-| **AC-03** | `QSG_RENDER_LOOP=basic` reaches every guest `qs` instance via the `alw-gui-run` shim; verified in-guest (`/proc/<pid>/environ` or qs log) | Planned |
-| **AC-04** | `layerrule = blur` is stripped/overridden for `quickshell` and popup layers in the synthesized session config | Planned |
+| **AC-02** | Bridge forces a clean full-frame upload on dimension change, presenter re-init and surface map/unmap/resize; pixel-store state enforced on every upload | **Done** — `m_fullFrameUploadPending` + per-surface map/unmap/resize tracking; padded rows repacked to a tight stride (driver ignores `UNPACK_ROW_LENGTH`) |
+| **AC-03** | `QSG_RENDER_LOOP=basic` reaches every guest `qs` instance via the `alw-gui-run` shim; verified in-guest (`/proc/<pid>/environ` or qs log) | **Done (code)** — exported in `ALW_GUI_RUN_SHIM` (`QSG_RENDER_LOOP=basic`) |
+| **AC-04** | `layerrule = blur` is stripped/overridden for `quickshell` and popup layers in the synthesized session config | **Done** — `hl.layer_rule({ match = { namespace = "quickshell" }, blur = false, blur_popups = false })` + unit test |
 | **AC-05** | Quickshell popups/launcher overlays and the `alw-fps` pill render artifact-free on the Pad 8 across open/close and render-scale changes (evidence) | Planned |
 | **AC-06** | Unit tests + `./gradlew assembleDebug` green; evidence in `docs/tasks/TASK-035/evidence/`; commit pushed to `origin/main` | Planned |
 
