@@ -1,9 +1,9 @@
-# TASK-038 — Session Lifecycle Hardening: Single-Session Guard & Orphan Guest Reaping
+# TASK-039 — Session Lifecycle Hardening: Single-Session Guard & Orphan Guest Reaping
 
-> **Renumbered history:** TASK-035 → TASK-037 (2026-11-20, Quickshell spec took the 035 slot) →
-> **TASK-038** (2026-11-20, the FUSE Virtual Symlink Engine spec took the 037 slot). Implemented
-> in commit `b6b1db0`. Source-code comments citing older task numbers are updated by a
-> comment-only follow-up inside this task.
+> **Renumbered history:** TASK-035 → TASK-037 (Quickshell overlay fix took the 035 slot) →
+> TASK-038 (FUSE Virtual Symlink Engine took the 037 slot) → **TASK-039** (2026-11-20, the Google
+> ANGLE renderer spec took the 038 slot). Implemented in commit `b6b1db0`. Source-code comments
+> citing older task numbers are updated by a comment-only follow-up inside this task.
 
 **Epic:** [EPIC-ALW-P2 — Phase 2](../../initiatives/android-linux-workstation/epics/phase-2-wayland-turnip-compositor/EPIC.md)  
 **Initiative:** [Android Linux Workstation](../../initiatives/android-linux-workstation/INITIATIVE.md)  
@@ -11,7 +11,7 @@
 **Board:** [Central task board](../../../TASKS.md) is the workflow-status source.  
 **Owner / harness:** CommandCode / local Linux environment  
 **Planning workspace / branch / base:** `/media/DATA/project/android-linux-env` / `main`  
-**Write scope:** `core/session/`, `app/`, `docs/tasks/TASK-038/`  
+**Write scope:** `core/session/`, `app/`, `docs/tasks/TASK-039/`  
 **Risk:** High  
 **Status:** **In Progress** — claimed 2026-11-20 after on-device root-cause capture.  
 **Depends on:** TASK-004 (ProotProcessManager lifecycle), TASK-007 (WaylandSurfaceServer singleton), TASK-027 on-device testing (where the artifact surfaced).
