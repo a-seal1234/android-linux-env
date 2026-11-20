@@ -289,13 +289,11 @@ if [ -z "${'$'}WAYLAND_DISPLAY" ] || [ ! -S "${'$'}RUNTIME/${'$'}WAYLAND_DISPLAY
         export WAYLAND_DISPLAY
     fi
 fi
-# Guest applications render on the Adreno 825 through Turnip + Zink (Kopper).
+# Guest applications render on the Adreno 825 through Turnip (Vulkan).
 # The compositor itself stays on kms_swrast (GBM EGL init fails with zink on the
 # PRoot virtual DRM node), so the accelerated path is applied per application.
 export VK_ICD_FILENAMES="${'$'}{VK_ICD_FILENAMES:-/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json}"
 export VK_DRIVER_FILES="${'$'}{VK_DRIVER_FILES:-${'$'}VK_ICD_FILENAMES}"
-export MESA_LOADER_DRIVER_OVERRIDE=zink
-export GALLIUM_DRIVER=zink
 export LIBGL_ALWAYS_SOFTWARE=0
 export TU_DEBUG="${'$'}{TU_DEBUG:-noconform,noubwc}"
 export MESA_VK_WSI_PRESENT_MODE="${'$'}{MESA_VK_WSI_PRESENT_MODE:-immediate}"
@@ -303,6 +301,33 @@ export MESA_GL_VERSION_OVERRIDE="${'$'}{MESA_GL_VERSION_OVERRIDE:-4.6}"
 # TASK-035: Quickshell (Qt6 QML) must finish FBO rendering synchronously before
 # commit — the threaded render loop + Explicit Sync fences artifact on Turnip/Zink.
 export QSG_RENDER_LOOP="${'$'}{QSG_RENDER_LOOP:-basic}"
+
+# TASK-038: GLES backend selector. Google ANGLE's Vulkan backend is the default
+# when the guest bundle is installed (/opt/angle/lib); Mesa Zink stays the instant
+# fallback and the default when the bundle is absent.
+#   ALW_GL_BACKEND=angle  -> ANGLE (Vulkan/Turnip)     ALW_GL_BACKEND=zink -> Mesa Zink
+if [ -z "${'$'}ALW_GL_BACKEND" ]; then
+    if [ -d /opt/angle/lib ]; then ALW_GL_BACKEND=angle; else ALW_GL_BACKEND=zink; fi
+fi
+export ALW_GL_BACKEND
+case "${'$'}ALW_GL_BACKEND" in
+    angle)
+        if [ -d /opt/angle/lib ]; then
+            LD_LIBRARY_PATH="/opt/angle/lib${'$'}{LD_LIBRARY_PATH:+:${'$'}LD_LIBRARY_PATH}"
+            export LD_LIBRARY_PATH
+            export ANGLE_DEFAULT_PLATFORM=vulkan
+            unset MESA_LOADER_DRIVER_OVERRIDE GALLIUM_DRIVER
+        else
+            # Bundle missing: never leave a process without a GLES implementation.
+            ALW_GL_BACKEND=zink
+            export ALW_GL_BACKEND
+        fi
+        ;;
+esac
+if [ "${'$'}ALW_GL_BACKEND" = "zink" ]; then
+    export MESA_LOADER_DRIVER_OVERRIDE="${'$'}{MESA_LOADER_DRIVER_OVERRIDE:-zink}"
+    export GALLIUM_DRIVER="${'$'}{GALLIUM_DRIVER:-zink}"
+fi
 
 exec "${'$'}@"
 """

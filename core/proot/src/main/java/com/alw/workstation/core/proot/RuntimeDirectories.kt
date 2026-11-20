@@ -12,6 +12,7 @@ data class RuntimeDirectories(
     val rootfsBaseDir: File = File(filesDir, "rootfs"),
     val driversBaseDir: File = File(filesDir, "drivers"),
     val turnipDriversBaseDir: File = File(driversBaseDir, "turnip"),
+    val angleBundleBaseDir: File = File(driversBaseDir, "angle"),
     val overlaysBaseDir: File = File(filesDir, "overlays"),
     val fexOverlaysBaseDir: File = File(overlaysBaseDir, "fex"),
     val box64OverlaysBaseDir: File = File(overlaysBaseDir, "box64"),
@@ -29,6 +30,17 @@ data class RuntimeDirectories(
     fun getDriverDir(driverId: String): File = File(driversBaseDir, driverId)
     fun getTurnipDriverDir(version: String): File = File(turnipDriversBaseDir, version)
     fun getActiveTurnipDriverDir(): File = File(turnipDriversBaseDir, "active")
+    fun getAngleBundleDir(version: String): File = File(angleBundleBaseDir, version)
+    fun getActiveAngleBundleDir(): File {
+        val pointer = getAngleActivePointer()
+        val version = if (pointer.isFile) pointer.readText().trim() else ""
+        if (version.isNotEmpty()) {
+            val dir = getAngleBundleDir(version)
+            if (dir.isDirectory) return dir
+        }
+        return File(angleBundleBaseDir, "active")
+    }
+    fun getAngleActivePointer(): File = File(angleBundleBaseDir, "active-version")
     fun getOverlayDir(engine: String, version: String): File = File(File(overlaysBaseDir, engine.lowercase()), version)
     fun getActiveOverlayDir(engine: String): File = File(File(overlaysBaseDir, engine.lowercase()), "active")
     fun getRuntimeSocketDir(sessionId: String): File {
@@ -44,6 +56,7 @@ data class RuntimeDirectories(
         if (!rootfsBaseDir.exists()) rootfsBaseDir.mkdirs()
         if (!driversBaseDir.exists()) driversBaseDir.mkdirs()
         if (!turnipDriversBaseDir.exists()) turnipDriversBaseDir.mkdirs()
+        if (!angleBundleBaseDir.exists()) angleBundleBaseDir.mkdirs()
         if (!overlaysBaseDir.exists()) overlaysBaseDir.mkdirs()
         if (!fexOverlaysBaseDir.exists()) fexOverlaysBaseDir.mkdirs()
         if (!box64OverlaysBaseDir.exists()) box64OverlaysBaseDir.mkdirs()

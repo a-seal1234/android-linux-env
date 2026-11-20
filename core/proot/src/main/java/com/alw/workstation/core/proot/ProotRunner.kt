@@ -19,7 +19,9 @@ class ProotRunner(
         com.alw.workstation.core.proot.storage.StorageBridgeManager(dirs),
     private val kgslNodeChecker: (String) -> Boolean = { File(it).exists() },
     private val fakeFsManager: com.alw.workstation.core.proot.fakefs.FakeFsManager =
-        com.alw.workstation.core.proot.fakefs.FakeFsManager(dirs)
+        com.alw.workstation.core.proot.fakefs.FakeFsManager(dirs),
+    private val angleBundleManager: com.alw.workstation.core.proot.driver.AngleBundleManager =
+        com.alw.workstation.core.proot.driver.AngleBundleManager(dirs)
 ) {
     companion object {
         private const val TAG = "ALW::ProotRunner"
@@ -226,6 +228,18 @@ class ProotRunner(
             args.add(mount.toCliArg())
         }
 
+        // 8b. Google ANGLE guest GLES bundle (TASK-038). Bound only when a validated
+        // bundle is active; the alw-gui-run shim then selects it through
+        // ALW_GL_BACKEND/ANGLE_DEFAULT_PLATFORM and Mesa Zink stays the fallback.
+        val angleInstalled = angleBundleManager.isBundleInstalled()
+        if (angleInstalled) {
+            val angleLibDir = angleBundleManager.activeLibraryDir()
+            val guestAngleDir = File(rootfsDir, "opt/angle/lib")
+            if (!guestAngleDir.exists()) guestAngleDir.mkdirs()
+            args.add("-b")
+            args.add("${angleLibDir.absolutePath}:/opt/angle/lib")
+        }
+
         // 9. Optional x86_64 emulation hook & shared overlay bind-mount
         if (profile.emulation.enabled) {
             val engineName = profile.emulation.engine.name.lowercase()
@@ -282,7 +296,13 @@ class ProotRunner(
             fallbackEnv
         } else {
             EnvironmentGenerator.generateEnvironment(profile, sessionRuntimeDir)
-        }
+        }.toMutableMap()
+
+        // TASK-038: explicit backend for non-shim launches (Hyprland autostart also goes
+        // through alw-gui-run, but /usr/bin/env -i would drop an outside variable).
+        env["ALW_GL_BACKEND"] =
+            profile.gpu.environmentOverrides["ALW_GL_BACKEND"]
+                ?: if (angleInstalled) "angle" else "zink"
 
         args.add("/usr/bin/env")
         args.add("-i")

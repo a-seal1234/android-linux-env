@@ -9,7 +9,7 @@
 **Write scope:** `core/proot/`, `core/session/`, `app/`, `docs/tasks/TASK-038/`  
 **Risk:** Medium  
 **Priority:** **P0 — top of the `Ready` queue** (primary architectural fix for the 30–50 ms/frame guest bottleneck; see §7).  
-**Status:** **Ready** — registered 2026-11-20 (slot reassigned from the session-lifecycle task, now [TASK-039](../TASK-039/TASK.md)).  
+**Status:** **In Progress** — Phase 2 (backend selector + store) implemented 2026-11-20 (`a2e6c76`+); Phase 1 (aarch64 bundle) blocked on producing the artifact (no upstream aarch64 package exists); Phase 3 verification pending the bundle. Mesa Zink remains the active default today and is proven correct (selector resolves `zink` when the store is empty).  
 **Depends on:** TASK-009 (Turnip KGSL driver store + `VK_ICD_FILENAMES`), TASK-024 (virtual DRM render node), TASK-026 Phase 1 (GLES host presenter), TASK-035 (linear dma-buf constraints + padded-row repack), TASK-037 Phase 2 (Electron/Chromium Ozone wrapper defaults — reuse its env plumbing).  
 **Verification target:** Xiaomi Pad 8, wireless ADB `192.168.51.161:44021` (port is reassigned on reboot — always re-run `adb devices`).  
 **Fallback preserved:** Mesa Zink (`GALLIUM_DRIVER=zink`) stays the instant default whenever `/opt/angle/lib` is absent or `ALW_GL_BACKEND=zink` is set; the host bridge pipeline (`wayland_bridge.cpp`, one `wl_buffer`/`dma-buf` presentation path) is untouched by either backend.
@@ -83,8 +83,8 @@ Quickshell / Firefox / Electron (Antigravity) stability passes. Evidence in
 | Criterion | Description | Status |
 |---|---|---|
 | **AC-01** | Task registered with architecture, phases and AC table | **Done** |
-| **AC-02** | Verified `aarch64` ANGLE bundle installs to `/opt/angle/lib` with SHA-256 + ELF ABI validation and an in-guest verify script | Planned |
-| **AC-03** | Backend selector: `ALW_GL_BACKEND=angle` (default when installed) prepends `/opt/angle/lib` + `ANGLE_DEFAULT_PLATFORM=vulkan`; `ALW_GL_BACKEND=zink` restores Zink instantly | Planned |
+| **AC-02** | Verified `aarch64` ANGLE bundle installs to `/opt/angle/lib` with SHA-256 + ELF ABI validation and an in-guest verify script | **Storage plumbing done** — `AngleBundleManager` (`core/proot/.../driver/`) implements the versioned store, `active-version` pointer, per-library SHA-256 and glibc-aarch64 ELF validation (rejecting Bionic), unit-tested; **artifact itself still missing** (no upstream aarch64 package) |
+| **AC-03** | Backend selector: `ALW_GL_BACKEND=angle` (default when installed) prepends `/opt/angle/lib` + `ANGLE_DEFAULT_PLATFORM=vulkan`; `ALW_GL_BACKEND=zink` restores Zink instantly | **Done (code, 225 tests)** — `alw-gui-run` shim selector with bundle-presence detection + zink fallback when absent; `ProotRunner` binds the active bundle to `/opt/angle/lib` (step 8b) and seeds `ALW_GL_BACKEND` in the guest env for non-shim launches (profile override wins) |
 | **AC-04** | `eglinfo`/`es2_info` reports `ANGLE (Turnip Adreno 825)`; `DRM_FORMAT_MOD_LINEAR` preserved (no tiling artifacts) | Planned |
 | **AC-05** | A/B against Zink: drag FPS and frame time measured, with the 30–50 ms/frame translation cost demonstrably reduced or a documented verdict if not | Planned |
 | **AC-06** | Quickshell + Firefox + Electron stability passes; unit tests + `./gradlew assembleDebug` green; evidence recorded; pushed to `origin/main` | Planned |
