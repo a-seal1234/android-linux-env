@@ -9,9 +9,9 @@
 **Write scope:** `app/`, `core/session/`, `core/proot/`, `bridge/wayland/`, `docs/tasks/TASK-036/`  
 **Risk:** Medium  
 **Status:** **Ready** — registered 2026-11-20.  
-**Depends on:** TASK-037 (single-session guard + `GuestProcessReaper` — this task generalises it into user-facing recovery flows), TASK-004 (`ProotProcessManager` two-phase kill), TASK-007 (`WaylandSurfaceServer` singleton + `flock`), TASK-019 (`FakeFsManager` owns `/dev/shm`).  
+**Depends on:** TASK-038 (single-session guard + `GuestProcessReaper` — this task generalises it into user-facing recovery flows), TASK-004 (`ProotProcessManager` two-phase kill), TASK-007 (`WaylandSurfaceServer` singleton + `flock`), TASK-019 (`FakeFsManager` owns `/dev/shm`).  
 **Verification target:** Xiaomi Pad 8, wireless ADB `192.168.51.161:44021`.  
-**Fallback preserved:** the automatic single-session guard from TASK-037 (stop-first + orphan reaping) stays the silent default; the new dialog/button flows only add explicit control. LabWC Safe Mode and the Terminal session are untouched.
+**Fallback preserved:** the automatic single-session guard from TASK-038 (stop-first + orphan reaping) stays the silent default; the new dialog/button flows only add explicit control. LabWC Safe Mode and the Terminal session are untouched.
 
 ---
 
@@ -27,7 +27,7 @@ Launching heavy apps such as Firefox inside the PRoot guest can crash the whole 
 
 Every one of these leaves behind **zombie PRoot/compositor processes** and **stale runtime
 artifacts** (`wayland-*` sockets, `alw-host.sock`, `.hyprland.lock`), which cascade into crashes
-or overlapping sessions on subsequent launches. TASK-037 already reaps orphans and stops live
+or overlapping sessions on subsequent launches. TASK-038 already reaps orphans and stops live
 sessions before a relaunch; this task adds the **explicit recovery UX** (Close All Sessions,
 Resume-vs-Fresh prompt) and the **Firefox crash isolation** so the rice survives guest app
 crashes.
@@ -73,7 +73,7 @@ Before `launchSession()`: probe (1) `SessionController`/`serverManager.isRunning
 guest processes (reaper scan), (3) runtime sockets. Healthy active session → Compose dialog
 **`Resume Existing`** (navigate to `SessionSurfaceScreen`, re-attach `WaylandSurfaceView` to the
 running server — no relaunch) vs **`Close & Start Fresh`** (`closeAllSessions()` first, then
-boot clean). Only dead/stale state → silently auto-clean (reuse TASK-037's stop-first +
+boot clean). Only dead/stale state → silently auto-clean (reuse TASK-038's stop-first +
 reaping) and boot. Remember the choice per session with a "don't ask again" toggle persisted in
 preferences.
 
@@ -111,7 +111,7 @@ planting), and a full Firefox launch → force-kill Firefox → rice survives. E
    once each; (c) `am force-stop` mid-session, plant an orphan `hyprpaper`, relaunch → auto-clean;
    (d) `Close All Sessions` from Dashboard and from the HUD; (e) Firefox launch + `kill -9` on
    Firefox; rice must survive (`qs` bar still updates, `alw-host-query fps` still answers).
-3. Regression: TASK-037 double-launch guard still holds; Terminal session unaffected by
+3. Regression: TASK-038 double-launch guard still holds; Terminal session unaffected by
    `Close All Sessions` only when explicitly invoked (document the choice).
 
 ## 6. Risks & Mitigations
