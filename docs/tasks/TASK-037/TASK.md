@@ -1,4 +1,9 @@
-# TASK-035 — Session Lifecycle Hardening: Single-Session Guard & Orphan Guest Reaping
+# TASK-037 — Session Lifecycle Hardening: Single-Session Guard & Orphan Guest Reaping
+
+> **Renumbered from TASK-035 (2026-11-20):** the TASK-035 slot was reassigned to the Quickshell
+> overlay artifact & layer-surface sync fix; this implemented task keeps its content, status and
+> commit (`b6b1db0`) under TASK-037. Source-code comments still saying "TASK-035" are updated by
+> a comment-only follow-up inside this task.
 
 **Epic:** [EPIC-ALW-P2 — Phase 2](../../initiatives/android-linux-workstation/epics/phase-2-wayland-turnip-compositor/EPIC.md)  
 **Initiative:** [Android Linux Workstation](../../initiatives/android-linux-workstation/INITIATIVE.md)  
@@ -6,7 +11,7 @@
 **Board:** [Central task board](../../../TASKS.md) is the workflow-status source.  
 **Owner / harness:** CommandCode / local Linux environment  
 **Planning workspace / branch / base:** `/media/DATA/project/android-linux-env` / `main`  
-**Write scope:** `core/session/`, `app/`, `docs/tasks/TASK-035/`  
+**Write scope:** `core/session/`, `app/`, `docs/tasks/TASK-037/`  
 **Risk:** High  
 **Status:** **In Progress** — claimed 2026-11-20 after on-device root-cause capture.  
 **Depends on:** TASK-004 (ProotProcessManager lifecycle), TASK-007 (WaylandSurfaceServer singleton), TASK-027 on-device testing (where the artifact surfaced).
@@ -56,8 +61,12 @@ read `Idle` (exactly the switch-app-and-return path the user hit).
 **Phase 2 — orphan reaping (this change).** `GuestProcessReaper` scans `/proc` and SIGKILLs
 same-UID orphans before `startServer`. Injected `processLister`/`parentAlive`/`killer` make the
 selection logic host-JVM testable without Android framework stubs.
-**Phase 3 — on-device double-launch verification.** Reinstall, Launch → Launch → `ps` must show
-exactly one `Hyprland`; close/reopen windows must be ghost-free.
+**Phase 3 — on-device double-launch verification.** APK pushed to `/sdcard/Download/`
+(manual tap-install is the only path past HyperOS's `INSTALL_FAILED_USER_RESTRICTED`; the first
+guarded build was installed 2026-11-20, the final build with the `isRunning()` guard was
+re-pushed to `Download/alw-debug.apk`). **Pending next session:** tap-install the re-pushed APK,
+then Launch → Launch → `ps -A` must show exactly one `Hyprland`; close/reopen windows must be
+ghost-free; AC-02/03/06 then flip to Done.
 
 ## 4. Acceptance Criteria
 
