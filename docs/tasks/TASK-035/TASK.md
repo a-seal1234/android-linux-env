@@ -110,8 +110,8 @@ restores them on dispose, re-hiding after a swipe-reveal.
 | **AC-02** | Bridge forces a clean full-frame upload on dimension change, presenter re-init and surface map/unmap/resize; pixel-store state enforced on every upload | **Done** — `m_fullFrameUploadPending` + per-surface map/unmap/resize tracking; padded rows repacked to a tight stride (driver ignores `UNPACK_ROW_LENGTH`) |
 | **AC-03** | `QSG_RENDER_LOOP=basic` reaches every guest `qs` instance via the `alw-gui-run` shim; verified in-guest (`/proc/<pid>/environ` or qs log) | **Done (code)** — exported in `ALW_GUI_RUN_SHIM` (`QSG_RENDER_LOOP=basic`) |
 | **AC-04** | `layerrule = blur` is stripped/overridden for `quickshell` and popup layers in the synthesized session config | **Done** — `hl.layer_rule({ match = { namespace = "quickshell" }, blur = false, blur_popups = false })` + unit test |
-| **AC-05** | Quickshell popups/launcher overlays and the `alw-fps` pill render artifact-free on the Pad 8 across open/close and render-scale changes (evidence) | Planned |
-| **AC-06** | Unit tests + `./gradlew assembleDebug` green; evidence in `docs/tasks/TASK-035/evidence/`; commit pushed to `origin/main` | Planned |
+| **AC-05** | Quickshell popups/launcher overlays and the `alw-fps` pill render artifact-free on the Pad 8 across open/close and render-scale changes (evidence) | **Done (on-device 2026-11-20)** — overlay renders clean ([qs_overlay_after_fix.png](evidence/qs_overlay_after_fix.png), [record](evidence/on-device-verification-2026-11-20.md)); zero `rejecting non-linear modifier` lines |
+| **AC-06** | Unit tests + `./gradlew assembleDebug` green; evidence in `docs/tasks/TASK-035/evidence/`; commit pushed to `origin/main` | **Done** — 231 tests / 0 failures, `assembleDebug` green |
 
 ## 5. Verification Plan
 

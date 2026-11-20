@@ -329,6 +329,15 @@ if [ "${'$'}ALW_GL_BACKEND" = "zink" ]; then
     export GALLIUM_DRIVER="${'$'}{GALLIUM_DRIVER:-zink}"
 fi
 
+# TASK-036 Phase 3: Firefox isolation. Scoped to the Firefox binary path so no other
+# guest app loses its sandbox; a Firefox SIGSYS/SIGBUS must not take the rice down.
+case "${'$'}1" in
+    */firefox|*/firefox-bin|firefox|alw-firefox)
+        export MOZ_DISABLE_CONTENT_SANDBOX=1
+        export MOZ_ENABLE_WAYLAND=1
+        ;;
+esac
+
 exec "${'$'}@"
 """
 
@@ -631,6 +640,40 @@ else
 fi
 """
 
+    /**
+     * TASK-036 Phase 3: Firefox launcher that isolates the guest app from the rice.
+     *
+     * A Firefox `SIGSYS` (content sandbox) or `SIGBUS` (`/dev/shm` / memfd) must only
+     * kill Firefox. The sandbox is disabled for Firefox alone (never globally) and
+     * the Wayland backend is pinned so Ozone picks the nested compositor socket.
+     */
+    const val FIREFOX_SHIM = """#!/bin/bash
+# ALW Firefox runtime wrapper (TASK-036): guest-only sandbox/shm hardening.
+export MOZ_DISABLE_CONTENT_SANDBOX=1
+export MOZ_ENABLE_WAYLAND=1
+export MOZ_WAYLAND_USE_EGL=1
+export MOZ_X11_EGL=1
+
+BIN=""
+for candidate in /usr/lib/firefox/firefox /usr/bin/firefox-bin /usr/lib/firefox-developers/firefox; do
+    if [ -x "${'$'}candidate" ]; then BIN="${'$'}candidate"; break; fi
+done
+if [ -z "${'$'}BIN" ]; then
+    BIN="$(which -a firefox 2>/dev/null | grep -v '^/usr/local/bin/firefox' | head -n 1)"
+fi
+if [ -z "${'$'}BIN" ]; then
+    echo "alw-firefox: Firefox is not installed in this rootfs" >&2
+    exit 127
+fi
+
+# /dev/shm must be writable; FakeFsManager (TASK-019) binds an app-private tmpfs.
+if [ ! -w /dev/shm ] 2>/dev/null; then
+    echo "alw-firefox: /dev/shm is not writable; Firefox will abort (SIGBUS)" >&2
+fi
+
+exec "${'$'}BIN" "${'$'}@"
+"""
+
     const val SUDO_SHIM = """#!/bin/bash
 # PRoot Rice Compatibility Shim for sudo
 # In unrooted PRoot (-0), executes arguments directly without PAM authentication.
@@ -691,6 +734,7 @@ exec "${'$'}@"
             "fakeroot" to FAKEROOT_SHIM,
             "makepkg" to MAKEPKG_SHIM,
             "sudo" to SUDO_SHIM,
+            "alw-firefox" to FIREFOX_SHIM,
             "xdg-open" to XDG_OPEN_SHIM,
             "alw-host-query" to ALW_HOST_QUERY_SHIM,
             "alw-gui-run" to ALW_GUI_RUN_SHIM,

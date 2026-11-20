@@ -32,7 +32,11 @@ fun SessionSurfaceScreen(
     dashboardViewModel: DashboardViewModel,
     serverManager: WaylandServerManager,
     inputDispatcher: InputDispatcher,
-    onStopSession: () -> Unit
+    onStopSession: () -> Unit,
+    onCloseAllSessions: () -> Unit = {
+        dashboardViewModel.closeAllSessions()
+        onStopSession()
+    }
 ) {
     val state by dashboardViewModel.uiState.collectAsState()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -124,6 +128,9 @@ fun SessionSurfaceScreen(
                 onStopSession = {
                     dashboardViewModel.stopSession()
                     onStopSession()
+                },
+                onCloseAllSessions = {
+                    onCloseAllSessions()
                 },
                 renderScale = renderScales[renderScaleIndex],
                 onCycleRenderScale = {

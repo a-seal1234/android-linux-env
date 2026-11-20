@@ -75,6 +75,7 @@ fun FloatingControlPill(
     onSwitchInputProfile: (InputProfile) -> Unit,
     onSetVolume: (Float) -> Unit,
     onStopSession: () -> Unit,
+    onCloseAllSessions: () -> Unit = onStopSession,
     onReloadHyprland: (() -> Unit)? = null,
     onRegenerateDotfiles: (() -> Unit)? = null,
     onToggleSafeMode: (() -> Unit)? = null,
@@ -309,6 +310,26 @@ fun FloatingControlPill(
                         ) {
                             Text("Reset Dotfiles", fontSize = 10.sp, color = Color.White)
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // TASK-036: hard cleanup, also reaps guests orphaned by a crash.
+                    OutlinedButton(
+                        onClick = {
+                            isExpanded = false
+                            onCloseAllSessions()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFFB74D))
+                    ) {
+                        Text(
+                            "Close All Sessions",
+                            color = Color(0xFFFFB74D),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))

@@ -236,9 +236,14 @@ class MainActivity : ComponentActivity() {
         }
         params.preferredDisplayModeId = target?.modeId ?: 0
         window.attributes = params
+
+        // Measured: HyperOS keeps mActiveModeId at 4 (60 Hz) even with
+        // preferredDisplayModeId set to mode 2 (144 Hz), so the request is recorded
+        // here and the surface-level pin in WaylandSurfaceView (FIXED_SOURCE) is the
+        // part that actually reaches the guest pacer.
         android.util.Log.i(
             "ALW::RefreshRate",
-            "preferredDisplayModeId=${params.preferredDisplayModeId} " +
+            "requested preferredDisplayModeId=${params.preferredDisplayModeId} " +
                 "(modes=${display.supportedModes.joinToString { "${it.modeId}:${it.refreshRate.toInt()}Hz" }})"
         )
     }

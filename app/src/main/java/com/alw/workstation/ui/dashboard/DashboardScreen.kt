@@ -52,7 +52,8 @@ fun DashboardScreen(
     onOpenWizard: () -> Unit,
     onOpenTerminal: () -> Unit = {},
     onOpenConfigurator: (String?) -> Unit = {},
-    onOpenDriverStore: () -> Unit = {}
+    onOpenDriverStore: () -> Unit = {},
+    onCloseAllSessions: () -> Unit = { viewModel.closeAllSessions() }
 ) {
     val state by viewModel.uiState.collectAsState()
     val scope = rememberCoroutineScope()
@@ -88,7 +89,8 @@ fun DashboardScreen(
                 onOpenTerminal = onOpenTerminal,
                 onEdit = {
                     onOpenConfigurator(state.activeProfile?.id)
-                }
+                },
+                onCloseAllSessions = onCloseAllSessions
             )
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -209,7 +211,8 @@ fun ActiveProfileHeroCard(
     profile: StackProfile?,
     onLaunch: () -> Unit,
     onOpenTerminal: () -> Unit = {},
-    onEdit: () -> Unit = {}
+    onEdit: () -> Unit = {},
+    onCloseAllSessions: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -253,6 +256,14 @@ fun ActiveProfileHeroCard(
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
                         Text("Launch GUI", fontWeight = FontWeight.Bold)
+                    }
+                    OutlinedButton(
+                        onClick = onCloseAllSessions,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Text("Close All Sessions")
                     }
                 }
             }

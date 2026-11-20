@@ -17,6 +17,7 @@ import com.alw.workstation.core.session.CompositorOrchestrator
 import com.alw.workstation.core.session.GuestProcessReaper
 import com.alw.workstation.core.session.ProfileRepository
 import com.alw.workstation.core.session.SessionController
+import com.alw.workstation.core.session.SessionCleanupCoordinator
 import com.alw.workstation.core.session.SessionState
 import com.alw.workstation.core.session.isLiveSession
 import com.alw.workstation.core.session.model.StackProfile
@@ -54,7 +55,8 @@ class DashboardViewModel(
     private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
     private val appContext: Context? = null,
     private val sessionWindowProvider: (() -> Window?)? = null,
-    private val guestProcessReaper: GuestProcessReaper? = null
+    private val guestProcessReaper: GuestProcessReaper? = null,
+    private val sessionCleanupCoordinator: SessionCleanupCoordinator = SessionCleanupCoordinator()
 ) {
     private var riceHostBridge: RiceHostBridge? = null
 
@@ -310,6 +312,37 @@ class DashboardViewModel(
         sessionController.stopSession()
         audioBridgeManager.stopAudioServer()
         _uiState.update { it.copy(sessionState = SessionState.Stopped) }
+        refresh()
+    }
+
+    /**
+     * TASK-036 Phase 1: explicit "Close All Sessions". Unlike [stopSession] this also
+     * terminates guests orphaned by a crashed/killed app instance and purges stale
+     * runtime artifacts (wayland sockets/locks, alw-host.sock, .hyprland.lock).
+     */
+    fun closeAllSessions() {
+        launchJob?.cancel()
+        launchJob = null
+        SessionInputBus.setSessionFocused(false)
+        serverManager?.clearKeyboardModifiers()
+        stopRiceHostBridge()
+        serverManager?.stopServer()
+        sessionController.stopSession()
+        audioBridgeManager.stopAudioServer()
+
+        val report = sessionCleanupCoordinator.closeAllSessions(
+            listOfNotNull(dirs.fakefsBaseDir.resolve("tmp/rt"))
+        )
+        if (report.hadWork) {
+            Log.i(
+                "ALW::Dashboard",
+                "Close All Sessions: terminated=${report.terminatedPids} " +
+                    "killed=${report.killedPids} purged=${report.purgedArtifacts.size}"
+            )
+        }
+        _uiState.update {
+            it.copy(sessionState = SessionState.Idle)
+        }
         refresh()
     }
 
