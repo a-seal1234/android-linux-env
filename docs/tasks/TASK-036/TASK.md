@@ -8,7 +8,7 @@
 **Planning workspace / branch / base:** `/media/DATA/project/android-linux-env` / `main`  
 **Write scope:** `app/`, `core/session/`, `core/proot/`, `bridge/wayland/`, `docs/tasks/TASK-036/`  
 **Risk:** Medium  
-**Status:** **Ready** — registered 2026-11-20.  
+**Status:** **In Progress** — Headless complete; Code Complete — On-Device Verification Pending (Xiaomi Pad 8 offline overnight).  
 **Depends on:** TASK-038 (single-session guard + `GuestProcessReaper` — this task generalises it into user-facing recovery flows), TASK-004 (`ProotProcessManager` two-phase kill), TASK-007 (`WaylandSurfaceServer` singleton + `flock`), TASK-019 (`FakeFsManager` owns `/dev/shm`).  
 **Verification target:** Xiaomi Pad 8, wireless ADB `192.168.51.161:44021`.  
 **Fallback preserved:** the automatic single-session guard from TASK-038 (stop-first + orphan reaping) stays the silent default; the new dialog/button flows only add explicit control. LabWC Safe Mode and the Terminal session are untouched.
@@ -90,18 +90,18 @@ Unit tests for duplicate detection (healthy/stale/zombie matrices) and stale-soc
 purge list — `./gradlew test assembleDebug`. On-device (`192.168.51.161:44021`): Resume path,
 Close & Start Fresh path, `Close All Sessions` after a hard kill (`am force-stop` + orphan
 planting), and a full Firefox launch → force-kill Firefox → rice survives. Evidence in
-`docs/tasks/TASK-036/evidence/`.
+[docs/tasks/TASK-036/evidence/verification.md](evidence/verification.md).
 
 ## 4. Acceptance Criteria
 
 | Criterion | Description | Status |
 |---|---|---|
 | **AC-01** | Task registered with architecture, phases and AC table | **Done** |
-| **AC-02** | `closeAllSessions()` terminates the guest tree (SIGTERM→grace→SIGKILL), purges stale sockets/locks, resets the bridge listener and `SessionController` to Idle | Planned |
-| **AC-03** | `Close All Sessions` button present on the Dashboard (beside Launch GUI) and in the in-session HUD menu | Planned |
-| **AC-04** | Pre-launch probe: healthy session → Resume/Close-&-Start-Fresh dialog; stale-only → silent auto-clean; choice persistable | Planned |
-| **AC-05** | Firefox launches without `SIGSYS`/`SIGBUS` tearing down the session (`MOZ_*` env + verified `/dev/shm` bind); killing Firefox leaves the rice alive | Planned |
-| **AC-06** | Unit tests (duplicate detection + stale purge) green; on-device verification of all flows on the Pad 8 with evidence; commit pushed to `origin/main` | Planned |
+| **AC-02** | `closeAllSessions()` terminates the guest tree (SIGTERM→grace→SIGKILL), purges stale sockets/locks, resets the bridge listener and `SessionController` to Idle | **Code Complete — On-Device Verification Pending** |
+| **AC-03** | `Close All Sessions` button present on the Dashboard (beside Launch GUI) and in the in-session HUD menu | **Code Complete — On-Device Verification Pending** |
+| **AC-04** | Pre-launch probe: healthy session → Resume/Close-&-Start-Fresh dialog; stale-only → silent auto-clean; choice persistable | **Code Complete — On-Device Verification Pending** |
+| **AC-05** | Firefox launches without `SIGSYS`/`SIGBUS` tearing down the session (`MOZ_*` env + verified `/dev/shm` bind); killing Firefox leaves the rice alive | **Code Complete — On-Device Verification Pending** |
+| **AC-06** | Unit tests (duplicate detection + stale purge) green; on-device verification of all flows on the Pad 8 with evidence; commit pushed to `origin/main` | **Code Complete — On-Device Verification Pending** |
 
 ## 5. Verification Plan
 

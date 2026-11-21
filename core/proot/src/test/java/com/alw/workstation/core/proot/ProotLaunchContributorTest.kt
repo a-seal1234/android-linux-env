@@ -142,4 +142,61 @@ class ProotLaunchContributorTest {
         assertTrue(content.contains("VK_ICD_FILENAMES"))
         assertTrue(content.contains("ALW_GL_BACKEND"))
     }
+
+    @Test
+    fun testCorePinningContributor() {
+        val contributor = CorePinningContributor(dirs)
+        val profile = StackProfile.defaultArchXiaomiPad8()
+
+        val env = contributor.extraEnvVars(profile, dirs)
+        assertEquals("2", env["MALLOC_ARENA_MAX"])
+
+        val overrides = contributor.runnerEnvOverrides()
+        assertTrue(overrides.containsKey("PROOT_NO_SECCOMP"))
+        assertEquals(null, overrides["PROOT_NO_SECCOMP"])
+    }
+
+    @Test
+    fun testSandboxIsolationContributor() {
+        val contributor = SandboxIsolationContributor(dirs)
+        val profile = StackProfile.defaultArchXiaomiPad8()
+        val rootfsDir = dirs.getRootfsDir("archlinux-default").apply { mkdirs() }
+
+        val env = contributor.extraEnvVars(profile, dirs)
+        assertEquals("1", env["MOZ_DISABLE_CONTENT_SANDBOX"])
+        assertEquals("1", env["MOZ_DISABLE_RDD_SANDBOX"])
+        assertEquals("1", env["MOZ_DISABLE_GMP_SANDBOX"])
+        assertEquals("1", env["MOZ_DISABLE_SOCKET_PROCESS_SANDBOX"])
+        assertEquals("1", env["QTWEBENGINE_DISABLE_SANDBOX"])
+        assertEquals("wayland", env["ELECTRON_OZONE_PLATFORM_HINT"])
+
+        val binds = contributor.extraBindMounts(profile, rootfsDir, dirs)
+        assertEquals(1, binds.size)
+        assertEquals(File(dirs.fakefsBaseDir, "dev/shm").absolutePath, binds[0].hostPath)
+        assertEquals("/dev/shm", binds[0].guestPath)
+    }
+
+    @Test
+    fun testDefaultContributorsAppliedInProotRunner() {
+        val runner = ProotRunner(dirs = dirs, prootBinaryPath = "/data/app/lib/lib_proot.so")
+        val profile = StackProfile.defaultArchXiaomiPad8()
+        val sessionRuntimeDir = File(tempDir, "runtime/session-defaults")
+
+        val cmd = runner.buildLaunchCommand(profile, sessionRuntimeDir)
+
+        // PROOT_NO_SECCOMP should be unset in host runner env by CorePinningContributor
+        assertFalse(cmd.environment.containsKey("PROOT_NO_SECCOMP"))
+        assertEquals(dirs.prootTmpDir.absolutePath, cmd.environment["PROOT_TMP_DIR"])
+
+        // Guest environment arguments should include tuning & sandbox variables
+        assertTrue(cmd.arguments.contains("MALLOC_ARENA_MAX=2"))
+        assertTrue(cmd.arguments.contains("MOZ_DISABLE_CONTENT_SANDBOX=1"))
+        assertTrue(cmd.arguments.contains("QTWEBENGINE_DISABLE_SANDBOX=1"))
+        assertTrue(cmd.arguments.contains("ELECTRON_OZONE_PLATFORM_HINT=wayland"))
+
+        // Bind mount for /dev/shm should be present
+        val shmHostPath = File(dirs.fakefsBaseDir, "dev/shm").absolutePath
+        val hasShmBind = cmd.arguments.any { it.contains(shmHostPath) && it.contains("/dev/shm") }
+        assertTrue("Command should contain bind mount for /dev/shm", hasShmBind)
+    }
 }

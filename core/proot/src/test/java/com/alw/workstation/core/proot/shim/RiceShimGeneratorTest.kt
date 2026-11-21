@@ -93,6 +93,44 @@ class RiceShimGeneratorTest {
         val content = rendererFile.readText()
         assertTrue(content.contains("freedreno)"))
         assertTrue(content.contains("ALW_GL_BACKEND"))
+
+        val nosandboxFile = File(envDir, "20-alw-nosandbox.sh")
+        assertTrue("20-alw-nosandbox.sh must exist", nosandboxFile.isFile)
+        val nosandboxContent = nosandboxFile.readText()
+        assertTrue(nosandboxContent.contains("MOZ_DISABLE_CONTENT_SANDBOX=1"))
+        assertTrue(nosandboxContent.contains("QTWEBENGINE_DISABLE_SANDBOX=1"))
+        assertTrue(nosandboxContent.contains("ELECTRON_OZONE_PLATFORM_HINT=wayland"))
+        assertTrue(nosandboxContent.contains("/dev/shm"))
+        assertTrue(nosandboxContent.contains("libnosandbox.so"))
+
+        val runtimeFile = File(envDir, "30-alw-runtime.sh")
+        assertTrue("30-alw-runtime.sh must exist", runtimeFile.isFile)
+        val runtimeContent = runtimeFile.readText()
+        assertTrue(runtimeContent.contains("MALLOC_ARENA_MAX=2"))
+        assertTrue(runtimeContent.contains("taskset -p 0xf8"))
+
+        val etcAlwDir = envDir.parentFile ?: envDir
+        val cFile = File(etcAlwDir, "libnosandbox.c")
+        assertTrue("libnosandbox.c must exist in /etc/alw", cFile.isFile)
+        val cContent = cFile.readText()
+        assertTrue(cContent.contains("PR_SET_SECCOMP"))
+        assertTrue(cContent.contains("CLONE_NEWUSER"))
+        assertTrue(cContent.contains("unshare"))
+    }
+
+    @Test
+    fun testChromiumElectronWrappers() {
+        RiceShimGenerator.installShims(targetDir)
+
+        for (bin in RiceShimGenerator.CHROMIUM_ELECTRON_BINARIES) {
+            val wrapperFile = File(targetDir, bin)
+            assertTrue("$bin wrapper must exist in /usr/local/bin", wrapperFile.isFile)
+            assertTrue("$bin wrapper must be executable", wrapperFile.canExecute())
+            val content = wrapperFile.readText()
+            assertTrue(content.contains("--no-sandbox"))
+            assertTrue(content.contains("--disable-dev-shm-usage"))
+            assertTrue(content.contains("ELECTRON_OZONE_PLATFORM_HINT"))
+        }
     }
 
     @Test

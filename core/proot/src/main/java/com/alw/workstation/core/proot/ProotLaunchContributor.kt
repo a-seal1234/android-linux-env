@@ -35,6 +35,12 @@ interface ProotLaunchContributor {
     ): Map<String, String> = emptyMap()
 
     /**
+     * Returns overrides for host runner environment variables.
+     * A null value indicates the variable should be unset.
+     */
+    fun runnerEnvOverrides(): Map<String, String?> = emptyMap()
+
+    /**
      * Hook invoked after the PRoot process has been spawned.
      */
     fun onProcessSpawned(

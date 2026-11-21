@@ -333,6 +333,163 @@ if [ "${'$'}ALW_GL_BACKEND" = "zink" ]; then
 fi
 """
 
+    const val NOSANDBOX_ENV_SHIM = """#!/bin/sh
+# 20-alw-nosandbox.sh: disable sandboxing for guest desktop applications under PRoot (TASK-036)
+export MOZ_DISABLE_CONTENT_SANDBOX=1
+export MOZ_DISABLE_RDD_SANDBOX=1
+export MOZ_DISABLE_GMP_SANDBOX=1
+export MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1
+export QTWEBENGINE_DISABLE_SANDBOX=1
+export ELECTRON_OZONE_PLATFORM_HINT=wayland
+
+# Ensure /dev/shm is writable
+if [ ! -w /dev/shm ] 2>/dev/null; then
+    mkdir -p /dev/shm 2>/dev/null || true
+    chmod 1777 /dev/shm 2>/dev/null || true
+fi
+
+# Start session D-Bus if not present
+if [ -z "${'$'}DBUS_SESSION_BUS_ADDRESS" ]; then
+    if [ -S /tmp/rt/bus ]; then
+        export DBUS_SESSION_BUS_ADDRESS="unix:path=/tmp/rt/bus"
+    elif [ -S /run/user/1000/bus ]; then
+        export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/1000/bus"
+    elif command -v dbus-launch >/dev/null 2>&1; then
+        eval "${'$'}(dbus-launch --sh-syntax --exit-with-session 2>/dev/null)"
+    fi
+fi
+
+# Build/inject libnosandbox.so via LD_PRELOAD intercepting prctl(PR_SET_SECCOMP) and namespace flags in unshare()
+if [ ! -f /usr/lib/libnosandbox.so ] && [ -f /etc/alw/libnosandbox.c ] && command -v gcc >/dev/null 2>&1; then
+    gcc -shared -fPIC /etc/alw/libnosandbox.c -o /usr/lib/libnosandbox.so -ldl 2>/dev/null || true
+fi
+if [ -f /usr/lib/libnosandbox.so ]; then
+    case ":${'$'}LD_PRELOAD:" in
+        *:/usr/lib/libnosandbox.so:*) ;;
+        *) export LD_PRELOAD="/usr/lib/libnosandbox.so${'$'}{LD_PRELOAD:+:${'$'}LD_PRELOAD}" ;;
+    esac
+fi
+"""
+
+    const val RUNTIME_ENV_SHIM = """#!/bin/sh
+# 30-alw-runtime.sh: runtime memory tuning and CPU core pinning (TASK-036)
+export MALLOC_ARENA_MAX=2
+
+# Pin process to performance cores CPUs 3-7 (mask 0xf8 = 0b11111000)
+if command -v taskset >/dev/null 2>&1; then
+    taskset -p 0xf8 ${'$'}${'$'} >/dev/null 2>&1 || true
+fi
+"""
+
+    const val LIBNOSANDBOX_C = """/* libnosandbox.c: intercepts prctl(PR_SET_SECCOMP) and namespace flags in unshare() under PRoot */
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <dlfcn.h>
+#include <sys/prctl.h>
+#include <sched.h>
+#include <errno.h>
+
+#ifndef PR_SET_SECCOMP
+#define PR_SET_SECCOMP 22
+#endif
+
+#ifndef CLONE_NEWUSER
+#define CLONE_NEWUSER 0x10000000
+#endif
+#ifndef CLONE_NEWNS
+#define CLONE_NEWNS 0x00020000
+#endif
+#ifndef CLONE_NEWPID
+#define CLONE_NEWPID 0x20000000
+#endif
+#ifndef CLONE_NEWNET
+#define CLONE_NEWNET 0x40000000
+#endif
+#ifndef CLONE_NEWIPC
+#define CLONE_NEWIPC 0x08000000
+#endif
+#ifndef CLONE_NEWUTS
+#define CLONE_NEWUTS 0x04000000
+#endif
+#ifndef CLONE_NEWCGROUP
+#define CLONE_NEWCGROUP 0x02000000
+#endif
+
+int prctl(int option, unsigned long arg2, unsigned long arg3, unsigned long arg4, unsigned long arg5) {
+    static int (*real_prctl)(int, unsigned long, unsigned long, unsigned long, unsigned long) = NULL;
+    if (!real_prctl) {
+        real_prctl = (int (*)(int, unsigned long, unsigned long, unsigned long, unsigned long))dlsym(RTLD_NEXT, "prctl");
+    }
+    if (option == PR_SET_SECCOMP) {
+        /* Intercept seccomp sandbox enablement: pretend success to avoid SIGSYS in PRoot */
+        return 0;
+    }
+    return real_prctl ? real_prctl(option, arg2, arg3, arg4, arg5) : 0;
+}
+
+int unshare(int flags) {
+    static int (*real_unshare)(int) = NULL;
+    if (!real_unshare) {
+        real_unshare = (int (*)(int))dlsym(RTLD_NEXT, "unshare");
+    }
+    /* Mask out namespaces that cannot be created in unprivileged PRoot */
+    int masked_flags = flags & ~(CLONE_NEWUSER | CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWNET | CLONE_NEWIPC | CLONE_NEWUTS | CLONE_NEWCGROUP);
+    if (masked_flags == 0) {
+        return 0;
+    }
+    int ret = real_unshare ? real_unshare(masked_flags) : 0;
+    if (ret != 0 && (errno == EPERM || errno == EINVAL || errno == EACCES)) {
+        return 0;
+    }
+    return ret;
+}
+"""
+
+    val CHROMIUM_ELECTRON_BINARIES = listOf(
+        "chromium",
+        "google-chrome",
+        "google-chrome-stable",
+        "brave",
+        "brave-browser",
+        "electron",
+        "code",
+        "code-oss",
+        "antigravity"
+    )
+
+    fun generateChromiumWrapper(binaryName: String): String = """#!/bin/bash
+# PRoot wrapper for $binaryName: forces --no-sandbox --disable-dev-shm-usage (TASK-036)
+REAL_BIN="/usr/bin/$binaryName"
+if [ ! -x "${'$'}REAL_BIN" ]; then
+    REAL_BIN="${'$'}(which -a $binaryName 2>/dev/null | grep -v '^/usr/local/bin/$binaryName' | head -n 1)"
+fi
+if [ -z "${'$'}REAL_BIN" ]; then
+    echo "alw: $binaryName is not installed in this rootfs" >&2
+    exit 127
+fi
+
+export ELECTRON_OZONE_PLATFORM_HINT="${'$'}{ELECTRON_OZONE_PLATFORM_HINT:-wayland}"
+export QTWEBENGINE_DISABLE_SANDBOX=1
+
+has_nosandbox=0
+has_nodevshm=0
+for arg in "${'$'}@"; do
+    if [ "${'$'}arg" = "--no-sandbox" ]; then has_nosandbox=1; fi
+    if [ "${'$'}arg" = "--disable-dev-shm-usage" ]; then has_nodevshm=1; fi
+done
+
+EXTRA_ARGS=""
+if [ "${'$'}has_nosandbox" -eq 0 ]; then
+    EXTRA_ARGS="${'$'}EXTRA_ARGS --no-sandbox"
+fi
+if [ "${'$'}has_nodevshm" -eq 0 ]; then
+    EXTRA_ARGS="${'$'}EXTRA_ARGS --disable-dev-shm-usage"
+fi
+
+exec "${'$'}REAL_BIN" ${'$'}EXTRA_ARGS "${'$'}@"
+"""
+
     const val ALW_GUI_RUN_SHIM = """#!/bin/sh
 # ALW: launch a GUI client against the nested compositor's Wayland socket.
 # Hyprland does not always propagate WAYLAND_DISPLAY to exec_cmd children, and the
@@ -779,10 +936,20 @@ exec "${'$'}@"
                 file.setExecutable(true, false)
             } catch (_: Throwable) {}
         }
+
+        // Chromium / Electron --no-sandbox wrappers (TASK-036)
+        for (bin in CHROMIUM_ELECTRON_BINARIES) {
+            val file = File(targetDir, bin)
+            file.writeText(generateChromiumWrapper(bin))
+            try {
+                file.setReadable(true, false)
+                file.setExecutable(true, false)
+            } catch (_: Throwable) {}
+        }
     }
 
     /**
-     * Materializes modular environment scripts into /etc/alw/env.d/.
+     * Materializes modular environment scripts into /etc/alw/env.d/ and helper sources.
      */
     fun installEnvShims(targetDir: File) {
         if (!targetDir.exists()) {
@@ -790,7 +957,9 @@ exec "${'$'}@"
         }
 
         val envShims = mapOf(
-            "10-alw-renderer.sh" to RENDERER_ENV_SHIM
+            "10-alw-renderer.sh" to RENDERER_ENV_SHIM,
+            "20-alw-nosandbox.sh" to NOSANDBOX_ENV_SHIM,
+            "30-alw-runtime.sh" to RUNTIME_ENV_SHIM
         )
 
         for ((name, content) in envShims) {
@@ -800,5 +969,16 @@ exec "${'$'}@"
                 file.setReadable(true, false)
             } catch (_: Throwable) {}
         }
+
+        // Materialize libnosandbox.c in /etc/alw/
+        val etcAlwDir = targetDir.parentFile ?: targetDir
+        if (!etcAlwDir.exists()) {
+            etcAlwDir.mkdirs()
+        }
+        val nosandboxSrc = File(etcAlwDir, "libnosandbox.c")
+        nosandboxSrc.writeText(LIBNOSANDBOX_C)
+        try {
+            nosandboxSrc.setReadable(true, false)
+        } catch (_: Throwable) {}
     }
 }

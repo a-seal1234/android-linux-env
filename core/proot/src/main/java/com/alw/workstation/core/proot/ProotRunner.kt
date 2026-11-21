@@ -23,6 +23,8 @@ class ProotRunner(
     private val angleBundleManager: com.alw.workstation.core.proot.driver.AngleBundleManager =
         com.alw.workstation.core.proot.driver.AngleBundleManager(dirs),
     val contributors: List<ProotLaunchContributor> = listOf(
+        CorePinningContributor(dirs),
+        SandboxIsolationContributor(dirs),
         AngleBundleContributor(dirs, angleBundleManager)
     )
 ) {
@@ -365,6 +367,17 @@ class ProotRunner(
         // binary whose ld.so would register rseq (SIGSYS under Android 15+ seccomp) before
         // it ever exports GLIBC_TUNABLES to its children.
         runnerEnv["GLIBC_TUNABLES"] = "glibc.pthread.rseq=0"
+
+        // Apply contributor runner environment overrides (e.g., unsetting PROOT_NO_SECCOMP)
+        for (contributor in sortedContributors) {
+            for ((k, v) in contributor.runnerEnvOverrides()) {
+                if (v == null) {
+                    runnerEnv.remove(k)
+                } else {
+                    runnerEnv[k] = v
+                }
+            }
+        }
 
         // 14. Resolve execution binary (direct execution if binary is executable, otherwise fallback to linker64 if needed)
         val useLinker = prootBinaryPath.endsWith(".so") && !File(prootBinaryPath).canExecute() && File("/system/bin/linker64").canExecute()
