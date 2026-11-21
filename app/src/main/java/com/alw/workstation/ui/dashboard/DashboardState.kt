@@ -28,6 +28,8 @@ data class DashboardUiState(
     val showCloneDialog: Boolean = false,
     val showDeleteDialog: Boolean = false,
     val selectedWorkspace: RootfsInfo? = null,
+    val showDuplicateSessionDialog: Boolean = false,
+    val duplicateSessionSummary: String? = null,
     val isLoading: Boolean = false,
     val errorMessage: String? = null
 )

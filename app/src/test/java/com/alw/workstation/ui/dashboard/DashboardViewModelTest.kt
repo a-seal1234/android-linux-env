@@ -114,18 +114,29 @@ class DashboardViewModelTest {
     fun testSessionLaunchAndTeardown() = runTest {
         val testDispatcher = StandardTestDispatcher(testScheduler)
         val testScope = TestScope(testDispatcher)
+        // Lifecycle operations run on the injected dispatcher; use the test one so
+        // advanceUntilIdle() drives them deterministically.
+        val vm = DashboardViewModel(
+            dirs = dirs,
+            rootfsManager = rootfsManager,
+            driverManager = driverManager,
+            profileRepository = profileRepository,
+            sessionController = sessionController,
+            ioDispatcher = testDispatcher,
+            mainDispatcher = testDispatcher
+        )
 
-        viewModel.launchSession(testScope)
+        vm.launchSession(testScope)
         testScope.advanceUntilIdle()
+        advanceUntilIdle()
 
-        val runningState = viewModel.uiState.value.sessionState
-        assertTrue(runningState is SessionState.Running)
+        assertTrue(vm.uiState.value.sessionState is SessionState.Running)
 
-        viewModel.stopSession()
+        vm.stopSession()
         testScope.advanceUntilIdle()
+        advanceUntilIdle()
 
-        val stoppedState = viewModel.uiState.value.sessionState
-        assertEquals(SessionState.Stopped, stoppedState)
+        assertEquals(SessionState.Stopped, vm.uiState.value.sessionState)
     }
 
     @Test

@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.alw.workstation.core.proot.RootfsManager.RootfsInfo
 import com.alw.workstation.core.proot.shizuku.ShizukuCompanionState
 import com.alw.workstation.core.proot.shizuku.ShizukuState
+import com.alw.workstation.core.session.SessionState
 import com.alw.workstation.core.session.model.StackProfile
 import java.io.File
 
@@ -83,13 +84,23 @@ fun DashboardScreen(
             ActiveProfileHeroCard(
                 profile = state.activeProfile,
                 onLaunch = {
-                    viewModel.launchSession()
-                    onLaunchSession()
+                    if (viewModel.launchSession()) {
+                        onLaunchSession()
+                    }
                 },
                 onOpenTerminal = onOpenTerminal,
                 onEdit = {
                     onOpenConfigurator(state.activeProfile?.id)
                 },
+                onCloseAllSessions = onCloseAllSessions
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // TASK-036: session recovery, own full-width card so it is an obvious,
+            // easy target (the hero-card row was too cramped).
+            SessionControlCard(
+                sessionState = state.sessionState,
                 onCloseAllSessions = onCloseAllSessions
             )
 
@@ -158,6 +169,107 @@ fun DashboardScreen(
             onDismiss = { viewModel.dismissDeleteDialog() },
             onConfirm = { viewModel.deleteWorkspace(it.id) }
         )
+    }
+
+    // TASK-036 Phase 2: a healthy session is already running — never stack another.
+    if (state.showDuplicateSessionDialog) {
+        DuplicateSessionDialog(
+            summary = state.duplicateSessionSummary,
+            onResume = { viewModel.resumeExistingSession() },
+            onCloseAndStartFresh = {
+                viewModel.closeAndStartFresh()
+                onLaunchSession()
+            },
+            onDismiss = { viewModel.dismissDuplicateSessionDialog() }
+        )
+    }
+}
+
+@Composable
+fun DuplicateSessionDialog(
+    summary: String?,
+    onResume: () -> Unit,
+    onCloseAndStartFresh: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("A session is already running") },
+        text = {
+            Column {
+                Text("Resume it to keep the running compositor and clients as they are,")
+                Text("or close every session (including leftovers from a crash) and start clean.")
+                if (summary != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        summary,
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onResume) { Text("Resume Existing") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCloseAndStartFresh) { Text("Close & Start Fresh") }
+        }
+    )
+}
+
+@Composable
+fun SessionControlCard(
+    sessionState: SessionState,
+    onCloseAllSessions: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Session Control",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Terminates every guest session and purges stale wayland sockets, " +
+                            "alw-host.sock and .hyprland.lock — use it after a crash.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                InfoPill(label = "State", value = sessionState::class.simpleName ?: "Unknown")
+                Spacer(modifier = Modifier.weight(1f))
+                Button(
+                    onClick = onCloseAllSessions,
+                    modifier = Modifier.height(48.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
+                ) {
+                    Text("Close All Sessions", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
     }
 }
 
@@ -256,14 +368,6 @@ fun ActiveProfileHeroCard(
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
                         Text("Launch GUI", fontWeight = FontWeight.Bold)
-                    }
-                    OutlinedButton(
-                        onClick = onCloseAllSessions,
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error
-                        )
-                    ) {
-                        Text("Close All Sessions")
                     }
                 }
             }

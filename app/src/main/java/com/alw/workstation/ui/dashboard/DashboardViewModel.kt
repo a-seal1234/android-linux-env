@@ -61,6 +61,9 @@ class DashboardViewModel(
     private var riceHostBridge: RiceHostBridge? = null
 
     private val sessionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** Scope used by the fire-and-forget lifecycle operations (teardown/cleanup). */
+    private fun lifecycleScope(): CoroutineScope = CoroutineScope(SupervisorJob() + ioDispatcher)
     private var audioCoordinateJob: Job? = null
     private var launchJob: Job? = null
 
@@ -177,17 +180,107 @@ class DashboardViewModel(
         }
     }
 
-    fun launchSession(scope: CoroutineScope = sessionScope) {
+    fun launchSession(scope: CoroutineScope = sessionScope): Boolean {
+        // TASK-036 Phase 2: a healthy session on screen is offered as Resume instead of
+        // silently restarting; stale-only leftovers are auto-cleaned and booted.
+        if (!hasPendingDuplicatePrompt() && isHealthySessionRunning()) {
+            _uiState.update {
+                it.copy(
+                    showDuplicateSessionDialog = true,
+                    duplicateSessionSummary = describeLiveSession()
+                )
+            }
+            return false
+        }
+        dismissDuplicateSessionDialog()
+        startSession(scope)
+        return true
+    }
+
+    /**
+     * Probe for a healthy, attachable session: native server running AND a live
+     * Wayland socket. A half-dead server must not be offered as "Resume".
+     */
+    private fun isHealthySessionRunning(): Boolean {
+        val serverRunning = serverManager?.isRunning() == true
+        val socketLive = dirs.fakefsBaseDir.resolve("tmp/rt").listFiles()
+            ?.any { it.name.startsWith("wayland-") && !it.name.endsWith(".lock") } == true
+        return serverRunning && socketLive
+    }
+
+    private fun describeLiveSession(): String {
+        val profile = _uiState.value.activeProfile?.id ?: "unknown"
+        val clients = serverManager?.getActiveClients() ?: 0
+        return "profile=$profile clients=$clients server=running"
+    }
+
+    private fun hasPendingDuplicatePrompt(): Boolean = _uiState.value.showDuplicateSessionDialog
+
+    fun dismissDuplicateSessionDialog() {
+        _uiState.update { it.copy(showDuplicateSessionDialog = false, duplicateSessionSummary = null) }
+    }
+
+    /** Dialog branch: re-attach to the running session without relaunching. */
+    fun resumeExistingSession() {
+        dismissDuplicateSessionDialog()
+        _uiState.update { it.copy(sessionState = SessionState.Running(
+            _uiState.value.activeProfile ?: StackProfile.defaultArchXiaomiPad8()
+        )) }
+    }
+
+    /** Dialog branch: terminate everything (including orphans) and boot clean. */
+    fun closeAndStartFresh(scope: CoroutineScope = sessionScope) {
+        dismissDuplicateSessionDialog()
+        // closeAllSessions() is asynchronous (it blocks on native joins), so chain
+        // the boot onto it instead of racing it.
+        lifecycleScope().launch {
+            try {
+                serverManager?.stopServer()
+                sessionController.stopSession()
+                audioBridgeManager.stopAudioServer()
+                stopRiceHostBridge()
+                sessionCleanupCoordinator.closeAllSessions(
+                    listOfNotNull(dirs.fakefsBaseDir.resolve("tmp/rt"))
+                )
+            } catch (e: Throwable) {
+                Log.e("ALW::Dashboard", "fresh-start cleanup failed: ${e.message}", e)
+            }
+            withContext(mainDispatcher) { startSession(scope) }
+        }
+    }
+
+    private fun startSession(scope: CoroutineScope) {
         // TASK-035: never stack a second compositor on one bridge output. A live
-        // session is stopped first, and guests orphaned by a previous app instance
-        // (installer SIGKILL / crash) are reaped before the new tree spawns. The
-        // native server state survives Activity recreation (where a fresh
-        // sessionController reads Idle), so it is the authoritative liveness signal.
+        // session is torn down synchronously first (stopSession() is async and would
+        // race the new tree), and guests orphaned by a previous app instance are
+        // reaped before the new tree spawns. The native server state survives
+        // Activity recreation, so it is the authoritative liveness signal.
         val sessionAlive = sessionController.sessionState.value.isLiveSession() ||
             serverManager?.isRunning() == true
         if (sessionAlive) {
-            stopSession()
+            // Native joins block; run the teardown on IO and continue on main so the
+            // launch state updates stay on the UI thread.
+            lifecycleScope().launch {
+                try {
+                    serverManager?.stopServer()
+                    sessionController.stopSession()
+                    audioBridgeManager.stopAudioServer()
+                    stopRiceHostBridge()
+                    sessionCleanupCoordinator.closeAllSessions(
+                        listOfNotNull(dirs.fakefsBaseDir.resolve("tmp/rt"))
+                    )
+                } catch (e: Throwable) {
+                    Log.e("ALW::Dashboard", "pre-launch teardown failed: ${e.message}", e)
+                }
+                withContext(mainDispatcher) { continueStartSession(scope) }
+            }
+            return
         }
+        continueStartSession(scope)
+    }
+
+    /** Spawns the session tree; runs on the main thread after any teardown finished. */
+    private fun continueStartSession(scope: CoroutineScope) {
         val reaped = guestProcessReaper?.reapOrphanedGuests().orEmpty()
         if (reaped.isNotEmpty()) {
             Log.i("ALW::Dashboard", "Reaped orphaned guest processes: $reaped")
@@ -306,13 +399,22 @@ class DashboardViewModel(
         launchJob?.cancel()
         launchJob = null
         SessionInputBus.setSessionFocused(false)
-        serverManager?.clearKeyboardModifiers()
-        stopRiceHostBridge()
-        serverManager?.stopServer()
-        sessionController.stopSession()
-        audioBridgeManager.stopAudioServer()
-        _uiState.update { it.copy(sessionState = SessionState.Stopped) }
-        refresh()
+        // Native joins + socket teardown block; run them off the main thread.
+        lifecycleScope().launch {
+            try {
+                serverManager?.clearKeyboardModifiers()
+                stopRiceHostBridge()
+                serverManager?.stopServer()
+                sessionController.stopSession()
+                audioBridgeManager.stopAudioServer()
+            } catch (e: Throwable) {
+                Log.e("ALW::Dashboard", "stopSession failed: ${e.message}", e)
+            }
+            withContext(mainDispatcher) {
+                _uiState.update { it.copy(sessionState = SessionState.Stopped) }
+                refresh()
+            }
+        }
     }
 
     /**
@@ -320,30 +422,44 @@ class DashboardViewModel(
      * terminates guests orphaned by a crashed/killed app instance and purges stale
      * runtime artifacts (wayland sockets/locks, alw-host.sock, .hyprland.lock).
      */
-    fun closeAllSessions() {
+    fun closeAllSessions(scope: CoroutineScope = sessionScope) {
         launchJob?.cancel()
         launchJob = null
         SessionInputBus.setSessionFocused(false)
-        serverManager?.clearKeyboardModifiers()
-        stopRiceHostBridge()
-        serverManager?.stopServer()
-        sessionController.stopSession()
-        audioBridgeManager.stopAudioServer()
 
-        val report = sessionCleanupCoordinator.closeAllSessions(
-            listOfNotNull(dirs.fakefsBaseDir.resolve("tmp/rt"))
-        )
-        if (report.hadWork) {
-            Log.i(
-                "ALW::Dashboard",
-                "Close All Sessions: terminated=${report.terminatedPids} " +
-                    "killed=${report.killedPids} purged=${report.purgedArtifacts.size}"
-            )
+        // Everything below blocks (native joins, /proc scan, grace sleep) — it must
+        // never run on the main thread or the UI ANRs and the process gets killed.
+        lifecycleScope().launch {
+            try {
+                serverManager?.clearKeyboardModifiers()
+                stopRiceHostBridge()
+                serverManager?.stopServer()
+                sessionController.stopSession()
+                audioBridgeManager.stopAudioServer()
+
+                val report = sessionCleanupCoordinator.closeAllSessions(
+                    listOfNotNull(dirs.fakefsBaseDir.resolve("tmp/rt"))
+                )
+                if (report.hadWork) {
+                    Log.i(
+                        "ALW::Dashboard",
+                        "Close All Sessions: terminated=${report.terminatedPids} " +
+                            "killed=${report.killedPids} purged=${report.purgedArtifacts.size}"
+                    )
+                }
+            } catch (e: Throwable) {
+                Log.e("ALW::Dashboard", "Close All Sessions failed: ${e.message}", e)
+                withContext(mainDispatcher) {
+                    _uiState.update {
+                        it.copy(errorMessage = "Close All Sessions failed: ${e.message}")
+                    }
+                }
+            }
+            withContext(mainDispatcher) {
+                _uiState.update { it.copy(sessionState = SessionState.Idle) }
+                refresh()
+            }
         }
-        _uiState.update {
-            it.copy(sessionState = SessionState.Idle)
-        }
-        refresh()
     }
 
     /**
