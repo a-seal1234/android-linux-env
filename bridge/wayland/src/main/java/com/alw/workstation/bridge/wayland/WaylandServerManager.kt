@@ -110,6 +110,7 @@ class WaylandServerManager {
     // Pointer, Keyboard & Touch JNI Native Declarations
     private external fun nativeSendPointerMotion(dx: Float, dy: Float)
     private external fun nativeSendPointerAbsolute(x: Float, y: Float)
+    private external fun nativeFlushPointerMotion()
     private external fun nativeSendPointerButton(buttonCode: Int, isDown: Boolean)
     private external fun nativeSendPointerAxis(axis: Int, value: Float)
     private external fun nativeSendKeyEvent(scanCode: Int, isDown: Boolean, metaState: Int)
@@ -321,6 +322,16 @@ class WaylandServerManager {
     }
 
     // Pointer, Keyboard & Touch Public API
+    var mockPointerMotionFlushed: Boolean = false
+
+    fun flushPointerMotion() {
+        if (isNativeLoaded) {
+            nativeFlushPointerMotion()
+        } else {
+            mockPointerMotionFlushed = true
+        }
+    }
+
     fun sendPointerAbsolute(x: Float, y: Float) {
         if (isNativeLoaded) {
             nativeSendPointerAbsolute(x, y)

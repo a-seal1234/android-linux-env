@@ -64,9 +64,43 @@ class WaylandSurfaceView @JvmOverloads constructor(
     private val vsyncCallback = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
             if (!vsyncRunning) return
+            flushPendingMotion()
             serverManager?.onVsync(frameTimeNanos)
             choreographer.postFrameCallback(this)
         }
+    }
+
+    private var pendingMotionEvent: MotionEvent? = null
+
+    /**
+     * Determines whether a high-frequency motion event should be coalesced per VSync tick.
+     * Touch and stylus digitizer ACTION_MOVE / ACTION_HOVER_MOVE events fire at 240+ Hz,
+     * so batching them to the presentation cadence saves substantial CPU without latency loss.
+     */
+    private fun isCoalesceableMotion(event: MotionEvent): Boolean {
+        if (!vsyncRunning) return false
+        val action = event.actionMasked
+        if (action != MotionEvent.ACTION_MOVE && action != MotionEvent.ACTION_HOVER_MOVE) {
+            return false
+        }
+        val toolType = event.getToolType(0)
+        return toolType == MotionEvent.TOOL_TYPE_FINGER ||
+               toolType == MotionEvent.TOOL_TYPE_STYLUS ||
+               toolType == MotionEvent.TOOL_TYPE_ERASER
+    }
+
+    private fun queueCoalescedMotion(event: MotionEvent): Boolean {
+        pendingMotionEvent?.recycle()
+        pendingMotionEvent = MotionEvent.obtain(event)
+        return true
+    }
+
+    fun flushPendingMotion() {
+        val pending = pendingMotionEvent ?: return
+        pendingMotionEvent = null
+        inputDispatcher?.handleMotionEvent(pending, width, height)
+        serverManager?.flushPointerMotion()
+        pending.recycle()
     }
 
     private fun startVsyncPacing() {
@@ -102,6 +136,7 @@ class WaylandSurfaceView @JvmOverloads constructor(
         val wasFocused = SessionInputBus.isSessionFocused
         SessionInputBus.setSessionFocused(focused)
         if (wasFocused && !focused) {
+            flushPendingMotion()
             serverManager?.clearKeyboardModifiers()
             if (hasPointerCapture()) {
                 releasePointerCapture()
@@ -205,16 +240,25 @@ class WaylandSurfaceView @JvmOverloads constructor(
         surfaceActive = false
         updateSessionFocus()
         stopVsyncPacing()
+        flushPendingMotion()
         serverManager?.detachSurface()
     }
 
     override fun onHoverEvent(event: MotionEvent): Boolean {
         if (!hasFocus()) requestFocus()
+        if (isCoalesceableMotion(event)) {
+            return queueCoalescedMotion(event)
+        }
+        flushPendingMotion()
         return inputDispatcher?.handleMotionEvent(event, width, height) ?: super.onHoverEvent(event)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!hasFocus()) requestFocus()
+        if (isCoalesceableMotion(event)) {
+            return queueCoalescedMotion(event)
+        }
+        flushPendingMotion()
         return inputDispatcher?.handleMotionEvent(event, width, height) ?: super.onTouchEvent(event)
     }
 
@@ -225,6 +269,10 @@ class WaylandSurfaceView @JvmOverloads constructor(
         if (event.isPointerMotion()) {
             requestUnbufferedDispatch(event)
         }
+        if (isCoalesceableMotion(event)) {
+            return queueCoalescedMotion(event)
+        }
+        flushPendingMotion()
         return inputDispatcher?.handleMotionEvent(event, width, height) ?: super.onGenericMotionEvent(event)
     }
 
@@ -237,6 +285,7 @@ class WaylandSurfaceView @JvmOverloads constructor(
 
     override fun onCapturedPointerEvent(event: MotionEvent): Boolean {
         if (!hasFocus()) requestFocus()
+        flushPendingMotion()
         return inputDispatcher?.handleMotionEvent(event, width, height) ?: super.onCapturedPointerEvent(event)
     }
 

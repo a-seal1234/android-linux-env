@@ -1745,25 +1745,44 @@ public:
         drawCursorOverlay();
     }
 
+    void flushPointerMotion() {
+        if (!m_pendingPointerMotion.load(std::memory_order_acquire)) {
+            return;
+        }
+        std::lock_guard<std::mutex> lock(m_inputMutex);
+        if (!m_pendingPointerMotion.exchange(false, std::memory_order_acq_rel)) {
+            return;
+        }
+        std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
+        dispatchPointerMotionInternal();
+    }
+
     void sendPointerAbsolute(float x, float y) {
         std::lock_guard<std::mutex> lock(m_inputMutex);
-        std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
-
         m_pointerState.x = std::clamp(x, 0.0f, static_cast<float>(m_width));
         m_pointerState.y = std::clamp(y, 0.0f, static_cast<float>(m_height));
-        dispatchPointerMotionInternal();
+        m_pendingPointerMotion.store(true, std::memory_order_release);
+        if (m_lastVsyncNs.load(std::memory_order_relaxed) == 0) {
+            std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
+            m_pendingPointerMotion.store(false, std::memory_order_release);
+            dispatchPointerMotionInternal();
+        }
     }
 
     void sendPointerMotion(float dx, float dy) {
         std::lock_guard<std::mutex> lock(m_inputMutex);
-        std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
-
         m_pointerState.x = std::clamp(m_pointerState.x + dx, 0.0f, static_cast<float>(m_width));
         m_pointerState.y = std::clamp(m_pointerState.y + dy, 0.0f, static_cast<float>(m_height));
-        dispatchPointerMotionInternal();
+        m_pendingPointerMotion.store(true, std::memory_order_release);
+        if (m_lastVsyncNs.load(std::memory_order_relaxed) == 0) {
+            std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
+            m_pendingPointerMotion.store(false, std::memory_order_release);
+            dispatchPointerMotionInternal();
+        }
     }
 
     void sendPointerButton(uint32_t buttonCode, bool isDown) {
+        flushPointerMotion();
         std::lock_guard<std::mutex> lock(m_inputMutex);
         std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
 
@@ -1808,6 +1827,7 @@ public:
     }
 
     void sendPointerAxis(int axis, float value) {
+        flushPointerMotion();
         std::lock_guard<std::mutex> lock(m_inputMutex);
         std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
 
@@ -1974,6 +1994,7 @@ public:
     // Java event loop and crashes from a non-attached native thread.
     void onVsync(int64_t frameTimeNanos) {
         m_lastVsyncNs.store(frameTimeNanos);
+        flushPointerMotion();
         static std::atomic<int> s_vsyncTicks{0};
         int tick = s_vsyncTicks.fetch_add(1);
         if (tick < 5 || tick % 300 == 0)
@@ -3758,6 +3779,7 @@ private:
     int m_cursorDrawnY = -1;
 
     PointerState m_pointerState;
+    std::atomic<bool> m_pendingPointerMotion{false};
     uint32_t m_depressedModifiers{0};
     uint32_t m_lockedModifiers{0};
 };
@@ -4098,6 +4120,14 @@ Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeSendPointerAb
     jfloat y
 ) {
     getServer()->sendPointerAbsolute(x, y);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_alw_workstation_bridge_wayland_WaylandServerManager_nativeFlushPointerMotion(
+    JNIEnv* env,
+    jobject thiz
+) {
+    getServer()->flushPointerMotion();
 }
 
 extern "C" JNIEXPORT void JNICALL
