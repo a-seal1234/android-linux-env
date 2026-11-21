@@ -54,6 +54,23 @@
 /* Android virtual render node advertised as the linux-dmabuf main device */
 #define ALW_VIRTUAL_DRM_DEV makedev(226, 128)
 
+/* EGL_ANDROID_native_fence_sync: turns the queued GL work into a dma-fence fd that
+ * zwp_linux_buffer_release_v1 can hand back to the client (explicit sync). */
+#ifndef EGL_SYNC_NATIVE_FENCE_ANDROID
+#define EGL_SYNC_NATIVE_FENCE_ANDROID 0x3140
+#endif
+
+/* DMA_BUF_IOCTL_EXPORT_SYNC_FILE: the implicit write fence of a dma-buf, used when a
+ * client does not bind zwp_linux_explicit_synchronization_v1. */
+#ifndef DMA_BUF_IOCTL_EXPORT_SYNC_FILE
+struct dma_buf_export_sync_file {
+    uint32_t flags;
+    int32_t fd;
+};
+#define DMA_BUF_IOCTL_EXPORT_SYNC_FILE \
+    _IOWR(DMA_BUF_BASE, 2, struct dma_buf_export_sync_file)
+#endif
+
 #ifndef __NR_memfd_create
 #define __NR_memfd_create 279
 #endif
@@ -273,6 +290,12 @@ struct DmabufFeedback {
 struct ClientSurface {
     uint32_t surfaceId;
     uint32_t attachedBufferId = 0;
+    // TASK-029: zwp_linux_explicit_synchronization_v1 state. The acquire fence is
+    // waited on before the buffer is read, and each get_release() object is answered
+    // with a release fence instead of a plain wl_buffer.release.
+    uint32_t syncId = 0;
+    int acquireFenceFd = -1;
+    std::vector<uint32_t> bufferReleaseIds;
     std::vector<uint32_t> frameCallbacks;
     std::vector<uint32_t> presentationFeedbacks;
     bool isCursor = false;
@@ -344,6 +367,7 @@ struct WaylandClient {
     uint32_t toplevelIconManagerId = 0;
     uint32_t shortcutsInhibitManagerId = 0;
     uint32_t dmabufId = 0;
+    uint32_t explicitSyncManagerId = 0;
 
     uint32_t activeSurfaceId = 0;
     bool pointerEntered = false;
@@ -358,6 +382,8 @@ struct WaylandClient {
     std::unordered_map<uint32_t, std::shared_ptr<DmabufBuffer>> dmabufBuffers;
     std::unordered_map<uint32_t, DmabufParams> dmabufParams;
     std::unordered_set<uint32_t> dmabufFeedbacks;
+    // zwp_linux_surface_synchronization_v1 id -> wl_surface id
+    std::unordered_map<uint32_t, uint32_t> surfaceSynchronizations;
     std::unordered_map<uint32_t, ClientSurface> surfaces;
     std::unordered_map<uint32_t, XdgPositioner> xdgPositioners;
     std::unordered_map<uint32_t, XdgSurface> xdgSurfaces;
@@ -382,6 +408,14 @@ struct WaylandClient {
         toplevelIconManagerId = 0;
         shortcutsInhibitManagerId = 0;
         dmabufId = 0;
+        explicitSyncManagerId = 0;
+        for (auto& pair : surfaces) {
+            if (pair.second.acquireFenceFd >= 0) {
+                close(pair.second.acquireFenceFd);
+                pair.second.acquireFenceFd = -1;
+            }
+        }
+        surfaceSynchronizations.clear();
         shmPools.clear();
         buffers.clear();
         dmabufBuffers.clear();
@@ -2103,6 +2137,8 @@ private:
         m_globals.push_back({14, "xdg_toplevel_icon_manager_v1", 1});
         m_globals.push_back({15, "zwp_keyboard_shortcuts_inhibit_manager_v1", 1});
         m_globals.push_back({16, "zwp_linux_dmabuf_v1", 4});
+        // v2 = per-surface acquire/release fences (TASK-029 explicit sync).
+        m_globals.push_back({17, "zwp_linux_explicit_synchronization_v1", 2});
     }
 
     uint32_t nextSerial() {
@@ -2344,6 +2380,9 @@ private:
             return false;
         }
 
+        // Implicit sync: never mmap/read a plane the guest's GPU may still be writing.
+        waitOnDmabufImplicitSync(plane.fd);
+
         // Zero-copy first (TASK-029): import the plane as an AHardwareBuffer, wrap it
         // in an EGLImage and sample it directly on the Adreno 825. Every failure mode
         // (probe miss, gralloc rejection, stride/offset the adapter cannot represent,
@@ -2481,6 +2520,95 @@ private:
         LOGI("Sent wl_surface.enter(output=%u) to surface %u", client.outputId, surface.surfaceId);
     }
 
+    // --- zwp_linux_explicit_synchronization_v1 helpers (TASK-029) ---
+
+    // Waits for an explicit-sync acquire fence before the buffer is read. dma-fence
+    // fds are pollable; the bounded wait keeps a stuck producer from freezing the
+    // whole session (the frame is presented anyway, as a compositor must).
+    static void waitOnAcquireFence(int fd, int timeoutMs) {
+        if (fd < 0) return;
+        struct pollfd pfd = { fd, POLLIN, 0 };
+        const int rc = poll(&pfd, 1, timeoutMs);
+        if (rc == 0) {
+            LOGW("explicit sync: acquire fence not signalled after %d ms; presenting anyway",
+                 timeoutMs);
+        } else if (rc < 0) {
+            LOGW("explicit sync: acquire fence poll failed: %s", strerror(errno));
+        }
+        close(fd);
+    }
+
+    // Implicit-sync handshake for the CPU read path. Clients that do not speak
+    // zwp_linux_explicit_synchronization_v1 (Hyprland/Aquamarine does not bind it)
+    // publish their write fence through the dma-buf itself, so exporting the buffer's
+    // read fence is what keeps the mmap copy from racing the guest's GPU render.
+    static void waitOnDmabufImplicitSync(int fd) {
+        if (fd < 0) return;
+        struct dma_buf_export_sync_file args = {};
+        args.flags = DMA_BUF_SYNC_READ;
+        args.fd = -1;
+        if (ioctl(fd, DMA_BUF_IOCTL_EXPORT_SYNC_FILE, &args) != 0) {
+            static int s_exportFailLog = 0;
+            if (++s_exportFailLog <= 3) {
+                LOGW("dmabuf: export sync file failed (%s); reading without a wait fence",
+                     strerror(errno));
+            }
+            return;
+        }
+        static int s_exportLog = 0;
+        if (s_exportLog == 0) {
+            s_exportLog = 1;
+            LOGI("dmabuf: implicit sync active (export_sync_file ok, fence=%s)",
+                 args.fd >= 0 ? "yes" : "none");
+        }
+        if (args.fd >= 0) waitOnAcquireFence(args.fd, 100);
+    }
+
+    // Creates a native fence that signals once the queued GL work for this frame
+    // (texture upload + draw) has completed, so the guest may reuse the dma-buf
+    // without the bridge still sampling it. Returns -1 when EGL cannot provide one.
+    int createGlReleaseFenceFd() {
+        using CreateSyncFn = EGLSyncKHR (*)(EGLDisplay, EGLenum, const EGLint*);
+        using DupFenceFn = EGLint (*)(EGLDisplay, EGLSyncKHR);
+        using DestroySyncFn = EGLBoolean (*)(EGLDisplay, EGLSyncKHR);
+        static CreateSyncFn s_createSync = reinterpret_cast<CreateSyncFn>(
+            eglGetProcAddress("eglCreateSyncKHR"));
+        static DupFenceFn s_dupFence = reinterpret_cast<DupFenceFn>(
+            eglGetProcAddress("eglDupNativeFenceFDANDROID"));
+        static DestroySyncFn s_destroySync = reinterpret_cast<DestroySyncFn>(
+            eglGetProcAddress("eglDestroySyncKHR"));
+        if (!m_glReady || s_createSync == nullptr || s_dupFence == nullptr) return -1;
+        if (!eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext)) return -1;
+
+        const EGLSyncKHR sync = s_createSync(m_eglDisplay, EGL_SYNC_NATIVE_FENCE_ANDROID,
+                                             nullptr);
+        if (sync == nullptr) return -1;
+        // eglDupNativeFenceFDANDROID requires the pending work to be flushed first.
+        glFlush();
+        const int fd = s_dupFence(m_eglDisplay, sync);
+        if (s_destroySync != nullptr) s_destroySync(m_eglDisplay, sync);
+        return fd >= 0 ? fd : -1;
+    }
+
+    // Answers every zwp_linux_buffer_release_v1 object created for this commit. The
+    // protocol replaces wl_buffer.release for explicitly synchronized surfaces, so the
+    // guest learns when the buffer is free through a release fence (or immediately).
+    void sendExplicitBufferRelease(int clientFd, ClientSurface& surface, bool gpuPresented) {
+        if (surface.bufferReleaseIds.empty()) return;
+        const int fenceFd = gpuPresented ? createGlReleaseFenceFd() : -1;
+        for (uint32_t releaseId : surface.bufferReleaseIds) {
+            if (fenceFd >= 0) {
+                WaylandMessageWriter released(releaseId, 0); // released(fence)
+                sendPacketWithFd(clientFd, released, fenceFd);
+            } else {
+                WaylandMessageWriter immediate(releaseId, 1); // immediate_release()
+                sendPacket(clientFd, immediate);
+            }
+        }
+        surface.bufferReleaseIds.clear();
+        if (fenceFd >= 0) close(fenceFd);
+    }
+
     // Process a single Wayland message from a client
     void dispatchMessage(WaylandClient& client, uint32_t objId, uint16_t opcode,
                          const uint8_t* payload, size_t payloadLen) {
@@ -2604,6 +2732,9 @@ private:
                     client.toplevelIconManagerId = newId;
                 } else if (iface == "zwp_keyboard_shortcuts_inhibit_manager_v1") {
                     client.shortcutsInhibitManagerId = newId;
+                } else if (iface == "zwp_linux_explicit_synchronization_v1") {
+                    client.explicitSyncManagerId = newId;
+                    LOGI("registry bind: %s v%u (explicit sync enabled)", iface.c_str(), version);
                 } else if (iface == "zwp_linux_dmabuf_v1") {
                     client.dmabufId = newId;
                     // v1/v2 legacy format + v3 modifier events
@@ -2711,6 +2842,61 @@ private:
             return;
         }
 
+        // 2e. zwp_linux_explicit_synchronization_v1 requests
+        if (client.explicitSyncManagerId > 0 && objId == client.explicitSyncManagerId) {
+            if (opcode == 0) {
+                client.explicitSyncManagerId = 0;
+            } else if (opcode == 1) {
+                // get_synchronization(new_id, surface)
+                uint32_t syncId = reader.readUint32();
+                uint32_t surfaceId = reader.readUint32();
+                auto sIt = client.surfaces.find(surfaceId);
+                if (sIt != client.surfaces.end()) {
+                    sIt->second.syncId = syncId;
+                    client.surfaceSynchronizations[syncId] = surfaceId;
+                    LOGI("explicit sync: surface_synchronization %u bound to wl_surface %u",
+                         syncId, surfaceId);
+                } else {
+                    LOGW("explicit sync: get_synchronization for unknown wl_surface %u", surfaceId);
+                }
+            }
+            return;
+        }
+
+        // 2f. zwp_linux_surface_synchronization_v1 requests
+        auto syncIt = client.surfaceSynchronizations.find(objId);
+        if (syncIt != client.surfaceSynchronizations.end()) {
+            auto sIt = client.surfaces.find(syncIt->second);
+            if (sIt == client.surfaces.end()) {
+                client.surfaceSynchronizations.erase(syncIt);
+                return;
+            }
+            auto& surface = sIt->second;
+            if (opcode == 0) {
+                // destroy()
+                surface.syncId = 0;
+                if (surface.acquireFenceFd >= 0) {
+                    close(surface.acquireFenceFd);
+                    surface.acquireFenceFd = -1;
+                }
+                client.surfaceSynchronizations.erase(syncIt);
+            } else if (opcode == 1) {
+                // set_acquire_fence(fd)
+                if (client.pendingFd >= 0) {
+                    if (surface.acquireFenceFd >= 0) close(surface.acquireFenceFd);
+                    surface.acquireFenceFd = client.pendingFd;
+                    client.pendingFd = -1; // consumed
+                } else {
+                    LOGW("explicit sync: set_acquire_fence without an fd (surface %u)",
+                         surface.surfaceId);
+                }
+            } else if (opcode == 2) {
+                // get_release(new_id)
+                surface.bufferReleaseIds.push_back(reader.readUint32());
+            }
+            return;
+        }
+
         // 3. wl_shm requests
         if (client.shmId > 0 && objId == client.shmId) {
             if (opcode == 0) {
@@ -2810,6 +2996,10 @@ private:
             auto& surface = surfIt->second;
             if (opcode == 0) {
                 // wl_surface.destroy
+                if (surface.acquireFenceFd >= 0) {
+                    close(surface.acquireFenceFd);
+                    surface.acquireFenceFd = -1;
+                }
                 client.surfaces.erase(surfIt);
             } else if (opcode == 1) {
                 // wl_surface.attach(buffer_id, x, y)
@@ -2827,7 +3017,14 @@ private:
                      surface.frameCallbacks.size(), surface.isXdgSurface ? 1 : 0,
                      surface.isCursor ? 1 : 0);
                 sendSurfaceEnterIfNeeded(client, surface);
+                // TASK-029: explicit sync — the guest's producer may still be writing
+                // the buffer, so wait for its acquire fence before reading pixels.
+                if (surface.acquireFenceFd >= 0) {
+                    waitOnAcquireFence(surface.acquireFenceFd, 100);
+                    surface.acquireFenceFd = -1;
+                }
                 const bool mapped = surface.attachedBufferId > 0;
+                bool gpuPresented = false;
                 int32_t attachW = 0, attachH = 0;
                 auto dbIt = client.dmabufBuffers.find(surface.attachedBufferId);
                 if (mapped && dbIt != client.dmabufBuffers.end()) {
@@ -2850,15 +3047,20 @@ private:
                         bool isMainSurface = surface.isXdgSurface
                                              || (!surface.isCursor && dbuf->width >= 320 && dbuf->height >= 240);
                         if (isMainSurface) {
-                            importAndRenderDmabuf(dbuf);
+                            gpuPresented = importAndRenderDmabuf(dbuf);
                         } else if (surface.isCursor) {
                             captureCursorFromDmabuf(dbuf);
                             drawCursorOverlay();
                         }
-                        // wl_buffer.release: the imported fd set is retained; the client may reuse
-                        WaylandMessageWriter releaseMsg(surface.attachedBufferId, 0);
-                        sendPacket(client.fd, releaseMsg);
-                        LOGI("wl_buffer %u: release sent (dmabuf)", surface.attachedBufferId);
+                        // With explicit sync the release is delivered through the
+                        // client's zwp_linux_buffer_release_v1 objects (below); keeping
+                        // wl_buffer.release as well would let the guest overwrite the
+                        // buffer while the compositor still reads it.
+                        if (surface.bufferReleaseIds.empty()) {
+                            WaylandMessageWriter releaseMsg(surface.attachedBufferId, 0);
+                            sendPacket(client.fd, releaseMsg);
+                            LOGI("wl_buffer %u: release sent (dmabuf)", surface.attachedBufferId);
+                        }
                     }
 
                     auto bIt = client.buffers.find(surface.attachedBufferId);
@@ -2869,7 +3071,9 @@ private:
                         bool isMainSurface = surface.isXdgSurface || (!surface.isCursor && buf.width >= 320 && buf.height >= 240);
                         if (isMainSurface && buf.storage && buf.storage->mappedData != nullptr) {
                             const uint8_t* pixels = buf.storage->mappedData + buf.offset;
-                            blitBufferToWindow(pixels, buf.width, buf.height, buf.stride, buf.format);
+                            blitBufferToWindow(pixels, buf.width, buf.height,
+                                               buf.stride, buf.format);
+                            gpuPresented = true;
                         } else if (surface.isCursor) {
                             // Cache the client cursor sprite for the overlay compositor.
                             captureCursorImage(buf);
@@ -2877,10 +3081,16 @@ private:
                         }
 
                         // Send wl_buffer.release event so client knows buffer is available for reuse
-                        WaylandMessageWriter releaseMsg(surface.attachedBufferId, 0);
-                        sendPacket(client.fd, releaseMsg);
+                        if (surface.bufferReleaseIds.empty()) {
+                            WaylandMessageWriter releaseMsg(surface.attachedBufferId, 0);
+                            sendPacket(client.fd, releaseMsg);
+                        }
                     }
                 }
+
+                // Explicit sync: answer the release objects created for this commit with
+                // a fence that fires once the GL work has finished reading the buffer.
+                sendExplicitBufferRelease(client.fd, surface, gpuPresented);
 
                 if (!surface.isCursor) {
                     client.activeSurfaceId = objId;
