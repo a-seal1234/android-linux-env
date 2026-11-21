@@ -3531,7 +3531,7 @@ private:
     bool m_glVideo[4] = {false, false, false, false};
 
     // --- Live performance / dynamic render scale (TASK-025) ----------------
-    std::atomic<float> m_renderScale{0.75f};   // 0.35 .. 1.0
+    std::atomic<float> m_renderScale{1.0f};   // 0.35 .. 1.0
     std::atomic<float> m_actualFps{0.0f};
     std::atomic<uint64_t> m_blitCounter{0};
 

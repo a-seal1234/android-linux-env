@@ -24,8 +24,10 @@ object ConfigSynthesizer {
         // profile because zink cannot initialize GBM EGL on the virtual DRM node.
         // Treating only LLVMPIPE as "software" left blur and shadows enabled on the
         // default profile — the dominant frame-time cost of the 1-2 FPS baseline.
+        val acceleratedCompositor = profile.gpu.forceCompositorZink ||
+            profile.gpu.driverMode == StackProfile.DriverMode.FREEDRENO_KGSL
         val softwareCompositor = profile.gpu.driverMode == StackProfile.DriverMode.LLVMPIPE ||
-            !profile.gpu.forceCompositorZink
+            !acceleratedCompositor
 
         // Measurement aid for the GPU Blocker Gate: a `misc:vfr = false` emission was
         // removed — Hyprland 0.57 rejects the key outright ("unknown config key
@@ -135,7 +137,7 @@ object ConfigSynthesizer {
             appendLine("# Xiaomi Pad 8 Default Hyprland Configuration")
             appendLine("# Managed by user; ALW sources this file before runtime overrides.")
             appendLine()
-            appendLine("monitor = , preferred, auto, 1.75")
+            appendLine("monitor = , preferred, auto, 1.6")
             appendLine()
             appendLine("\$terminal = kitty")
             appendLine("\$mainMod = SUPER")

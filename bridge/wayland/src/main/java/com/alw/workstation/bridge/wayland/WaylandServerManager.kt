@@ -193,7 +193,7 @@ class WaylandServerManager {
         private set
 
     /** Dynamic render scale applied to the guest output (0.35 .. 1.0). */
-    var renderScale: Float = 0.75f
+    var renderScale: Float = 1.0f
         private set
 
     /** Last surface size reported by the host view. */

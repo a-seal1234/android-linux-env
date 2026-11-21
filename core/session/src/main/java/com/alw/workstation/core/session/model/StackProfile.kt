@@ -70,6 +70,14 @@ data class StackProfile(
         TURNIP_ZINK,
         /** Extracted Qualcomm proprietary Adreno Vulkan driver paired with Zink for OpenGL */
         ADRENO_PROPRIETARY_ZINK,
+        /**
+         * Mesa freedreno Gallium renders GL/GLES on /dev/kgsl-3d0 directly, with no
+         * Vulkan layer in between (so no Zink WSI / explicit-sync fence artifacts).
+         * Verified on-device with the guest's Mesa 27 megadriver: `eglinfo` reports
+         * `EGL driver name: kgsl`, renderer `Adreno (TM) 825`, OpenGL ES 3.2 and GL 4.6
+         * core. Vulkan applications still use the Turnip ICD.
+         */
+        FREEDRENO_KGSL,
         /** Mesa LLVM Software Rasterizer (One-Tap Safe Mode fallback) */
         LLVMPIPE,
         /** Virtualized GPU */
@@ -80,7 +88,7 @@ data class StackProfile(
         val resolutionMode: ResolutionMode = ResolutionMode.NATIVE,
         val customWidth: Int? = null,
         val customHeight: Int? = null,
-        val scaleFactor: Float = 1.75f,
+        val scaleFactor: Float = 1.6f,
         val refreshRateHz: Int = 144
     )
 
@@ -275,7 +283,7 @@ data class StackProfile(
                     resolutionMode = ResolutionMode.valueOf(displayObj.optString("resolutionMode", "NATIVE").uppercase()),
                     customWidth = if (displayObj.has("customWidth")) displayObj.getInt("customWidth") else null,
                     customHeight = if (displayObj.has("customHeight")) displayObj.getInt("customHeight") else null,
-                    scaleFactor = displayObj.optDouble("scaleFactor", 1.75).toFloat(),
+                    scaleFactor = displayObj.optDouble("scaleFactor", 1.6).toFloat(),
                     refreshRateHz = displayObj.optInt("refreshRateHz", 144)
                 ),
                 storage = StorageConfig(
@@ -311,7 +319,7 @@ data class StackProfile(
         fun defaultArchXiaomiPad8(): StackProfile {
             return StackProfile(
                 id = "arch-xiaomi-pad-8",
-                name = "Arch Linux ARM (Hyprland + Turnip KGSL)",
+                name = "Arch Linux ARM (Hyprland + freedreno KGSL)",
                 distro = DistroConfig(
                     rootfsId = "archlinux-default",
                     architecture = "aarch64",
@@ -329,10 +337,13 @@ data class StackProfile(
                     extraArgs = listOf("-c", "/tmp/android-session.lua", "--i-am-really-stupid")
                 ),
                 gpu = GpuConfig(
-                    driverMode = DriverMode.TURNIP_KGSL,
+                    // TASK-035: freedreno (KGSL) is the shipped default — it renders
+                    // directly on the Adreno with no Vulkan/Zink WSI fence path.
+                    // EnvironmentGenerator pins MESA_LOADER_DRIVER_OVERRIDE=kgsl,
+                    // GALLIUM_DRIVER=kgsl and FD_MESA_DEBUG=sysmem,noubwc for this mode.
+                    driverMode = DriverMode.FREEDRENO_KGSL,
                     externalDriverId = "turnip-mesa-25.0.0-adreno825",
                     kgslNode = "/dev/kgsl-3d0",
-                    mesaLoaderOverride = "zink",
                     tuDebugNoConform = true,
                     environmentOverrides = mapOf(
                         "TU_DEBUG" to "noconform",
@@ -343,7 +354,8 @@ data class StackProfile(
                     resolutionMode = ResolutionMode.NATIVE,
                     customWidth = 3200,
                     customHeight = 2136,
-                    scaleFactor = 1.75f,
+                    // 3200x2136 / 1.6 = 2000x1335 — an exact integer monitor mode.
+                    scaleFactor = 1.6f,
                     refreshRateHz = 144
                 ),
                 storage = StorageConfig(),
@@ -377,7 +389,7 @@ data class StackProfile(
                     resolutionMode = ResolutionMode.NATIVE,
                     customWidth = 3200,
                     customHeight = 2136,
-                    scaleFactor = 1.75f,
+                    scaleFactor = 1.6f,
                     refreshRateHz = 144
                 ),
                 storage = StorageConfig(
@@ -420,7 +432,7 @@ data class StackProfile(
                     resolutionMode = ResolutionMode.NATIVE,
                     customWidth = 3200,
                     customHeight = 2136,
-                    scaleFactor = 1.75f,
+                    scaleFactor = 1.6f,
                     refreshRateHz = 144
                 ),
                 storage = StorageConfig(),

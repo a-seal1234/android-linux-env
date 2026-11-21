@@ -9,9 +9,20 @@ import java.io.File
 
 class EnvironmentGeneratorTest {
 
+    /** The shipped default is freedreno, so Turnip-specific coverage opts in explicitly. */
+    private fun turnipProfile(): StackProfile {
+        val base = StackProfile.defaultArchXiaomiPad8()
+        return base.copy(
+            gpu = base.gpu.copy(
+                driverMode = StackProfile.DriverMode.TURNIP_KGSL,
+                mesaLoaderOverride = "zink"
+            )
+        )
+    }
+
     @Test
     fun testTurnipKgslEnvironment() {
-        val profile = StackProfile.defaultArchXiaomiPad8()
+        val profile = turnipProfile()
         val runtimeDir = File("/tmp/runtime-0")
         val env = EnvironmentGenerator.generateEnvironment(profile, runtimeDir)
 
@@ -56,7 +67,7 @@ class EnvironmentGeneratorTest {
 
     @Test
     fun testForceCompositorZinkSwitchesTheCompositorLoader() {
-        val base = StackProfile.defaultArchXiaomiPad8()
+        val base = turnipProfile()
         val profile = base.copy(gpu = base.gpu.copy(forceCompositorZink = true))
         val env = EnvironmentGenerator.generateEnvironment(profile, File("/tmp/runtime-1"))
 
@@ -65,6 +76,31 @@ class EnvironmentGeneratorTest {
         assertEquals("zink", env["GALLIUM_DRIVER"])
         assertEquals("0", env["LIBGL_ALWAYS_SOFTWARE"])
         assertEquals("1", env["ALW_COMPOSITOR_ZINK"])
+    }
+
+    @Test
+    fun testFreedrenoKgslKeepsLoaderAndCompositorOnKgsl() {
+        val base = StackProfile.defaultArchXiaomiPad8()
+        val profile = base.copy(
+            gpu = base.gpu.copy(
+                driverMode = StackProfile.DriverMode.FREEDRENO_KGSL,
+                // A leftover "zink" override from a persisted profile must not win.
+                mesaLoaderOverride = "zink"
+            )
+        )
+        val env = EnvironmentGenerator.generateEnvironment(profile, File("/tmp/runtime-fd"))
+
+        // Direct GL/GLES on KGSL: no Vulkan layer between the app and the Adreno.
+        assertEquals("kgsl", env["MESA_LOADER_DRIVER_OVERRIDE"])
+        assertEquals("kgsl", env["GALLIUM_DRIVER"])
+        assertEquals("0", env["LIBGL_ALWAYS_SOFTWARE"])
+        // Tiled/UBWC frames shear through the bridge's linear dma-buf upload.
+        assertEquals("sysmem,noubwc", env["FD_MESA_DEBUG"])
+        assertEquals("gles2", env["WLR_RENDERER"])
+        // Vulkan applications keep the Turnip ICD.
+        assertEquals("/opt/drivers/turnip/active/freedreno_icd.aarch64.json", env["VK_ICD_FILENAMES"])
+        // The compositor is not demoted to kms_swrast in this mode.
+        assertNull(env["ALW_COMPOSITOR_ZINK"])
     }
 
     @Test
@@ -88,8 +124,9 @@ class EnvironmentGeneratorTest {
     @Test
     fun testNonHyprlandCompositorKeepsZinkDriver() {
         // KWin/Plasma profiles keep the Turnip/Zink driver selection (no compositor split)
-        val profile = StackProfile.defaultArchXiaomiPad8().copy(
-            compositor = StackProfile.defaultArchXiaomiPad8().compositor.copy(
+        val base = turnipProfile()
+        val profile = base.copy(
+            compositor = base.compositor.copy(
                 type = StackProfile.CompositorType.PLASMA,
                 execCommand = "startplasma-wayland"
             )

@@ -79,7 +79,7 @@ fun FloatingControlPill(
     onReloadHyprland: (() -> Unit)? = null,
     onRegenerateDotfiles: (() -> Unit)? = null,
     onToggleSafeMode: (() -> Unit)? = null,
-    renderScale: Float = 0.75f,
+    renderScale: Float = 1.0f,
     onCycleRenderScale: (() -> Unit)? = null,
     ctrlLatched: Boolean = false,
     onToggleCtrl: (() -> Unit)? = null,

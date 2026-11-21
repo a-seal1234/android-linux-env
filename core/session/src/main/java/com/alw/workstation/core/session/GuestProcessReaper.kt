@@ -45,9 +45,16 @@ class GuestProcessReaper(
     }
 
     private fun isReapable(proc: GuestProcess): Boolean {
-        if (proc.pid == myPid || proc.ppid == myPid) return false
+        if (proc.pid == myPid) return false
         if (proc.uid != myUid) return false
         if (proc.name !in GUEST_PROCESS_NAMES) return false
+
+        // Never touch a tree that is a direct child of this app instance: it may be
+        // the session that is about to be started/kept. Killing a previous
+        // session's PRoot launcher is the explicit Close All Sessions job
+        // (SessionCleanupCoordinator), not the pre-launch orphan sweep.
+        if (proc.ppid == myPid) return false
+
         // Children of init are orphans by definition; anything else must have a
         // dead parent to count as leftover.
         if (proc.ppid != 1 && parentAlive(proc.ppid)) return false

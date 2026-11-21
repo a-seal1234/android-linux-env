@@ -69,7 +69,10 @@ class SessionCleanupCoordinator(
      * Terminates the guest session tree (SIGTERM → grace → SIGKILL) and purges stale
      * runtime artifacts below [runtimeDirs]. Never throws; unreachable pids are skipped.
      */
-    fun closeAllSessions(runtimeDirs: List<File>): CleanupReport {
+    fun closeAllSessions(
+        runtimeDirs: List<File>,
+        preservedPaths: Set<String> = emptySet()
+    ): CleanupReport {
         val targets = processLister().filter { it.isSessionProcess() }
         val terminated = mutableListOf<Int>()
         val killed = mutableListOf<Int>()
@@ -101,18 +104,29 @@ class SessionCleanupCoordinator(
         return CleanupReport(
             terminatedPids = terminated,
             killedPids = killed,
-            purgedArtifacts = purgeArtifacts(runtimeDirs)
+            purgedArtifacts = purgeArtifacts(runtimeDirs, preservedPaths)
         )
     }
 
-    /** Deletes stale sockets/locks; returns the deleted paths. */
-    fun purgeArtifacts(runtimeDirs: List<File>): List<String> {
+    /**
+     * Deletes stale sockets/locks; returns the deleted paths.
+     *
+     * [preservedPaths] lists artifacts that must survive: the live Wayland bridge's
+     * own listening socket (`wayland-0`) is owned by the native singleton, and
+     * deleting it makes the next compositor fail with `CBackend::create() failed!`
+     * because Aquamarine cannot connect (observed on-device, TASK-036).
+     */
+    fun purgeArtifacts(
+        runtimeDirs: List<File>,
+        preservedPaths: Set<String> = emptySet()
+    ): List<String> {
         val purged = mutableListOf<String>()
         for (dir in runtimeDirs) {
             if (!dir.isDirectory) continue
             val children = dir.listFiles() ?: continue
             for (file in children) {
                 if (!isStaleSessionArtifact(file)) continue
+                if (file.absolutePath in preservedPaths) continue
                 try {
                     if (file.delete()) purged.add(file.absolutePath)
                 } catch (_: Throwable) {
@@ -125,6 +139,9 @@ class SessionCleanupCoordinator(
     private fun GuestProcessReaper.GuestProcess.isSessionProcess(): Boolean {
         if (pid == myPid || uid != myUid) return false
         if (name !in SESSION_PROCESS_NAMES) return false
+        // A direct child of this app is the PRoot launcher of the session being
+        // closed (PRoot never gets reparented), so it must be terminated too —
+        // otherwise its compositor children keep a stale socket alive.
         return true
     }
 }

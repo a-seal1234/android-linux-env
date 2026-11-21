@@ -89,7 +89,13 @@ class DashboardViewModel(
     fun refresh() {
         val workspaces = rootfsManager.listRootfs()
         val profiles = profileRepository.listProfiles()
-        val defaultProfile = profiles.find { it.id == "arch-kde-plasma" } ?: profiles.firstOrNull() ?: StackProfile.defaultArchXiaomiPad8()
+        // TASK-035: the shipped default is the freedreno (KGSL) Hyprland profile; any
+        // other profile — including a leftover KDE/Zink one — is only a fallback.
+        val defaultProfile = profiles.firstOrNull {
+            it.gpu.driverMode == StackProfile.DriverMode.FREEDRENO_KGSL
+        } ?: profiles.find { it.id == "arch-xiaomi-pad-8" }
+            ?: profiles.firstOrNull()
+            ?: StackProfile.defaultArchXiaomiPad8()
         val activeDriver = driverManager.getActiveDriver()
         val sessionState = sessionController.sessionState.value
         val audioStatus = audioBridgeManager.getStatus()
@@ -208,6 +214,16 @@ class DashboardViewModel(
         return serverRunning && socketLive
     }
 
+    /**
+     * The native bridge singleton owns `wayland-0` while it is listening. Purging it
+     * makes the next compositor die with `CBackend::create() failed!` (Aquamarine
+     * cannot connect), so it is preserved until the server is actually stopped.
+     */
+    private fun waylandBridgeSocketPaths(runtimeDir: File): Set<String> {
+        if (serverManager?.isRunning() != true) return emptySet()
+        return setOf(File(runtimeDir, "wayland-0").absolutePath)
+    }
+
     private fun describeLiveSession(): String {
         val profile = _uiState.value.activeProfile?.id ?: "unknown"
         val clients = serverManager?.getActiveClients() ?: 0
@@ -239,8 +255,10 @@ class DashboardViewModel(
                 sessionController.stopSession()
                 audioBridgeManager.stopAudioServer()
                 stopRiceHostBridge()
+                val runtimeDir = dirs.fakefsBaseDir.resolve("tmp/rt")
                 sessionCleanupCoordinator.closeAllSessions(
-                    listOfNotNull(dirs.fakefsBaseDir.resolve("tmp/rt"))
+                    listOf(runtimeDir),
+                    waylandBridgeSocketPaths(runtimeDir)
                 )
             } catch (e: Throwable) {
                 Log.e("ALW::Dashboard", "fresh-start cleanup failed: ${e.message}", e)
@@ -266,8 +284,10 @@ class DashboardViewModel(
                     sessionController.stopSession()
                     audioBridgeManager.stopAudioServer()
                     stopRiceHostBridge()
+                    val runtimeDir = dirs.fakefsBaseDir.resolve("tmp/rt")
                     sessionCleanupCoordinator.closeAllSessions(
-                        listOfNotNull(dirs.fakefsBaseDir.resolve("tmp/rt"))
+                        listOf(runtimeDir),
+                        waylandBridgeSocketPaths(runtimeDir)
                     )
                 } catch (e: Throwable) {
                     Log.e("ALW::Dashboard", "pre-launch teardown failed: ${e.message}", e)
@@ -368,7 +388,7 @@ class DashboardViewModel(
                     it.actualFps
                 } ?: 0f
 
-                override fun renderScale(): Float = serverManager?.renderScale ?: 0.75f
+                override fun renderScale(): Float = serverManager?.renderScale ?: 1.0f
 
                 override fun setRenderScale(scale: Float) {
                     serverManager?.setRenderScale(scale)
@@ -437,8 +457,10 @@ class DashboardViewModel(
                 sessionController.stopSession()
                 audioBridgeManager.stopAudioServer()
 
+                val runtimeDir = dirs.fakefsBaseDir.resolve("tmp/rt")
                 val report = sessionCleanupCoordinator.closeAllSessions(
-                    listOfNotNull(dirs.fakefsBaseDir.resolve("tmp/rt"))
+                    listOf(runtimeDir),
+                    waylandBridgeSocketPaths(runtimeDir)
                 )
                 if (report.hadWork) {
                     Log.i(

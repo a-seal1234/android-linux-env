@@ -8,9 +8,10 @@
 **Planning workspace / branch / base:** `/media/DATA/project/android-linux-env` / `main`  
 **Write scope:** `bridge/wayland/`, `core/session/`, `core/proot/`, `docs/tasks/TASK-035/`  
 **Risk:** Medium  
-**Status:** **Ready** — registered 2026-11-20 (slot reassigned from the session-lifecycle task, now [TASK-037](../TASK-037/TASK.md)).  
+**Status:** **In Progress — REOPENED 2026-11-21.** The user reports the Quickshell overlay artifact is **still visible** on the current Pad 8 build, so the 2026-11-20 "artifact GONE" verdict is withdrawn and AC-05 is reopened. The padded-row repack (`presentWithGl()` tight-stride copy), LINEAR-only advertisement and `QSG_RENDER_LOOP=basic` stay in place as defence in depth but are **not** accepted as the complete fix. Next step is a fresh symptom capture (which surface, which trigger, GPU vs CPU path A/B) before any further code change.  
 **Depends on:** TASK-024 (DMA-BUF pipeline), TASK-026 Phase 1 (GLES presenter, `qs -c alw-fps` pill), TASK-025 (Sekai Pop rice, `qs -c sekaipop`).  
 **Verification target:** Xiaomi Pad 8, wireless ADB `192.168.51.161:44021`.  
+**Alternative path investigated 2026-11-21 (freedreno/KGSL, no Vulkan layer):** the guest Mesa 27 megadriver ships freedreno and it initializes on this device — `eglinfo` with `GALLIUM_DRIVER=kgsl` reports `EGL driver name: kgsl`, renderer `Adreno (TM) 825`, OpenGL ES 3.2 and GL 4.6 core, with `/dev/kgsl-3d0` and `/usr/lib/dri/kgsl_dri.so` present. Since it bypasses Zink's WSI/Explicit-Sync fences entirely, `DriverMode.FREEDRENO_KGSL` is now implemented and selectable (`gpu.driverMode = "freedreno_kgsl"`, or per-app `ALW_GL_BACKEND=freedreno`); `ALW_GL_BACKEND=zink` stays a one-line rollback and the shipped default until an FPS/frame-time A/B is recorded. Evidence: [2026-11-21-freedreno-kgsl-probe.md](evidence/2026-11-21-freedreno-kgsl-probe.md).  
 **Fallback preserved:** the CPU blit path, `alw-fps` via `debug.*` kill switches, and the Waybar fallback launch (`ConfigSynthesizer` launches Waybar when `qs` is absent) remain untouched.
 
 ---
@@ -97,6 +98,27 @@ restores mode 0 on stop; `WaylandSurfaceView.applyForcedRefreshRate()` pins the 
 `setFrameRate(hz, FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)` and feeds the native pacer the same
 rate so the compositor cadence matches the panel.
 
+**Phase 2e — freedreno linear-rendering requirement (2026-11-21, on-device).** With
+`DriverMode.FREEDRENO_KGSL` the compositor renders on the Adreno 825 at native size and 60 FPS,
+but the first session showed heavy vertical macro-tile shear. Root cause: the bridge cannot
+import guest dma-bufs zero-copy on this device (`EGL_EXT_image_dma_buf_import=0`, and
+`AHardwareBuffer_createFromHandle` rejects the virtual node's `dma_heap` handle), so it presents
+via `mmap` + linear `glTexSubImage2D` — which requires the guest buffer itself to be linear.
+`FD_MESA_DEBUG=notile,noubwc` only covers *internal* buffers and does not help;
+`FD_MESA_DEBUG=sysmem,noubwc` does. Both `EnvironmentGenerator` (whole session) and the
+`alw-gui-run` shim's `freedreno)` branch now export it. Evidence:
+[2026-11-21-freedreno-sysmem-validation.md](evidence/2026-11-21-freedreno-sysmem-validation.md).
+Re-opening AC-05 stays unchanged: that criterion is about the Quickshell overlay on the Zink path.
+
+**Phase 2f — freedreno becomes the shipped default, monitor scale 1.6x (2026-11-21, on-device).**
+`StackProfile.defaultArchXiaomiPad8()` now returns `FREEDRENO_KGSL` (Hyprland + KGSL, no
+`mesaLoaderOverride`), and `DashboardViewModel.refresh()` prefers the first
+`FREEDRENO_KGSL` profile instead of `arch-kde-plasma`; KDE/Zink profiles stay loadable and
+selectable. Every profile default (and the JSON parse fallback + generated Hyprland user config)
+moved `scaleFactor` 1.75 → **1.6**, which divides 3200x2136 into an exact 2000x1335 mode and
+removes Hyprland's `Invalid scale passed to monitor WAYLAND-1` rounding banner on the tablet.
+Evidence: [2026-11-21-default-profile-freedreno-1_6x.md](evidence/2026-11-21-default-profile-freedreno-1_6x.md).
+
 **Phase 2d — immersive focus mode.** `SessionSurfaceScreen` hides the Android status/navigation
 bars for the session lifetime (`WindowCompat.setDecorFitsSystemWindows(false)` +
 `WindowInsetsControllerCompat.hide(systemBars)`, `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`) and
@@ -110,7 +132,7 @@ restores them on dispose, re-hiding after a swipe-reveal.
 | **AC-02** | Bridge forces a clean full-frame upload on dimension change, presenter re-init and surface map/unmap/resize; pixel-store state enforced on every upload | **Done** — `m_fullFrameUploadPending` + per-surface map/unmap/resize tracking; padded rows repacked to a tight stride (driver ignores `UNPACK_ROW_LENGTH`) |
 | **AC-03** | `QSG_RENDER_LOOP=basic` reaches every guest `qs` instance via the `alw-gui-run` shim; verified in-guest (`/proc/<pid>/environ` or qs log) | **Done (code)** — exported in `ALW_GUI_RUN_SHIM` (`QSG_RENDER_LOOP=basic`) |
 | **AC-04** | `layerrule = blur` is stripped/overridden for `quickshell` and popup layers in the synthesized session config | **Done** — `hl.layer_rule({ match = { namespace = "quickshell" }, blur = false, blur_popups = false })` + unit test |
-| **AC-05** | Quickshell popups/launcher overlays and the `alw-fps` pill render artifact-free on the Pad 8 across open/close and render-scale changes (evidence) | **Done (on-device 2026-11-20)** — overlay renders clean ([qs_overlay_after_fix.png](evidence/qs_overlay_after_fix.png), [record](evidence/on-device-verification-2026-11-20.md)); zero `rejecting non-linear modifier` lines |
+| **AC-05** | Quickshell popups/launcher overlays and the `alw-fps` pill render artifact-free on the Pad 8 across open/close and render-scale changes (evidence) | **REOPENED 2026-11-21** — user reports the artifact is still present on the current build; the 2026-11-20 verdict is withdrawn. Prior evidence kept for reference: **Done (on-device 2026-11-20)** — overlay renders clean ([qs_overlay_after_fix.png](evidence/qs_overlay_after_fix.png), [record](evidence/on-device-verification-2026-11-20.md)); zero `rejecting non-linear modifier` lines |
 | **AC-06** | Unit tests + `./gradlew assembleDebug` green; evidence in `docs/tasks/TASK-035/evidence/`; commit pushed to `origin/main` | **Done** — 231 tests / 0 failures, `assembleDebug` green |
 
 ## 5. Verification Plan

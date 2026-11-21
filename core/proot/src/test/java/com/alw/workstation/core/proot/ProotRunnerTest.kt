@@ -61,11 +61,13 @@ class ProotRunnerTest {
         assertTrue(envArgs.any { it.startsWith("PNPM_STORE_DIR=/home/alw/.cache/pnpm-store") })
         assertTrue(envArgs.any { it.startsWith("GOCACHE=/home/alw/.cache/go-build") })
 
-        // Check Turnip KGSL driver env vars
-        assertTrue(envArgs.any { it.startsWith("VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json") })
-        assertTrue(envArgs.any { it.startsWith("VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json") })
-        assertTrue(envArgs.any { it.startsWith("MESA_LOADER_DRIVER_OVERRIDE=kms_swrast") })
-        assertTrue(envArgs.none { it.startsWith("GALLIUM_DRIVER=") })
+        // Shipped default (TASK-035): freedreno straight on KGSL, linear frames only.
+        assertTrue(envArgs.any { it.startsWith("VK_ICD_FILENAMES=/opt/drivers/turnip/active/freedreno_icd.aarch64.json") })
+        assertTrue(envArgs.any { it.startsWith("VK_DRIVER_FILES=/opt/drivers/turnip/active/freedreno_icd.aarch64.json") })
+        assertTrue(envArgs.any { it.startsWith("MESA_LOADER_DRIVER_OVERRIDE=kgsl") })
+        assertTrue(envArgs.any { it.startsWith("GALLIUM_DRIVER=kgsl") })
+        assertTrue(envArgs.any { it.startsWith("FD_MESA_DEBUG=sysmem,noubwc") })
+        assertTrue(envArgs.any { it.startsWith("ALW_GL_BACKEND=freedreno") })
         assertTrue(envArgs.any { it.startsWith("TU_DEBUG=noconform") })
 
         // Check compositor exec with D-Bus session wrapping

@@ -14,9 +14,20 @@ class ConfigSynthesizerTest {
     @get:Rule
     val tempFolder = TemporaryFolder()
 
+    /** The default profile is freedreno now; Turnip coverage opts in explicitly. */
+    private fun turnipProfile(): StackProfile {
+        val base = StackProfile.defaultArchXiaomiPad8()
+        return base.copy(
+            gpu = base.gpu.copy(
+                driverMode = StackProfile.DriverMode.TURNIP_KGSL,
+                mesaLoaderOverride = "zink"
+            )
+        )
+    }
+
     @Test
     fun testSynthesizeHyprlandSessionConfigHardwareAcceleration() {
-        val profile = StackProfile.defaultArchXiaomiPad8()
+        val profile = turnipProfile()
         val config = ConfigSynthesizer.synthesizeHyprlandSessionConfig(profile)
 
         // Hyprland >= 0.57 Lua dialect (the INI dialect is silently ignored)
@@ -26,7 +37,7 @@ class ConfigSynthesizerTest {
         assertTrue(config.contains("disable_hyprland_logo = true"))
 
         // Display scale and nested backend environment
-        assertTrue(config.contains("hl.monitor({ output = \"\", mode = \"preferred\", position = \"auto\", scale = \"1.75\" })"))
+        assertTrue(config.contains("hl.monitor({ output = \"\", mode = \"preferred\", position = \"auto\", scale = \"1.6\" })"))
         assertTrue(config.contains("hl.env(\"AQ_BACKEND\", \"wayland\")"))
         assertTrue(config.contains("hl.env(\"WLR_BACKENDS\", \"wayland\")"))
         assertTrue(config.contains("hl.env(\"LIBSEAT_BACKEND\", \"noop\")"))
@@ -85,15 +96,29 @@ class ConfigSynthesizerTest {
     }
 
     @Test
-    fun testDefaultProfileDisablesExpensiveDecorations() {
-        // The default (non-LLVMPIPE) profile still soft-composites through kms_swrast,
-        // so the relief must apply there too — not only to the LLVMPIPE Safe Mode.
-        val config = ConfigSynthesizer.synthesizeHyprlandSessionConfig(
-            StackProfile.defaultArchXiaomiPad8()
+    fun testFreedrenoCompositorKeepsDecorations() {
+        val base = StackProfile.defaultArchXiaomiPad8()
+        val profile = base.copy(
+            gpu = base.gpu.copy(driverMode = StackProfile.DriverMode.FREEDRENO_KGSL)
         )
+        val config = ConfigSynthesizer.synthesizeHyprlandSessionConfig(profile)
 
-        assertTrue(config.contains("blur = { enabled = false }"))
-        assertTrue(config.contains("shadow = { enabled = false }"))
+        // freedreno composites on the Adreno, so blur/shadow stay enabled.
+        assertTrue(config.contains("blur = { enabled = true, size = 5, passes = 2 }"))
+        assertTrue(config.contains("shadow = { enabled = true }"))
+    }
+
+    @Test
+    fun testDefaultProfileCompositesOnFreedreno() {
+        // The shipped default (TASK-035) is freedreno: the compositor runs on the
+        // Adreno, so the expensive decorations stay enabled and the monitor scale is
+        // the 1.6 that divides 3200x2136 into an exact 2000x1335 mode.
+        val profile = StackProfile.defaultArchXiaomiPad8()
+        assertEquals(StackProfile.DriverMode.FREEDRENO_KGSL, profile.gpu.driverMode)
+
+        val config = ConfigSynthesizer.synthesizeHyprlandSessionConfig(profile)
+        assertTrue(config.contains("blur = { enabled = true, size = 5, passes = 2 }"))
+        assertTrue(config.contains("scale = \"1.6\""))
     }
 
     @Test
@@ -166,7 +191,7 @@ class ConfigSynthesizerTest {
         val userConfig = ConfigSynthesizer.generateDefaultHyprlandUserConfig()
 
         assertTrue(userConfig.contains("Xiaomi Pad 8 Default Hyprland Configuration"))
-        assertTrue(userConfig.contains("monitor = , preferred, auto, 1.75"))
+        assertTrue(userConfig.contains("monitor = , preferred, auto, 1.6"))
         assertTrue(userConfig.contains("bind = \$mainMod, Return, exec, \$terminal"))
         assertTrue(userConfig.contains("tablet {"))
         assertTrue(userConfig.contains("touchdevice {"))

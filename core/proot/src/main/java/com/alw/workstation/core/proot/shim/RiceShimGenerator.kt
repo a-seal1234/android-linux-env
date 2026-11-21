@@ -305,12 +305,26 @@ export QSG_RENDER_LOOP="${'$'}{QSG_RENDER_LOOP:-basic}"
 # TASK-038: GLES backend selector. Google ANGLE's Vulkan backend is the default
 # when the guest bundle is installed (/opt/angle/lib); Mesa Zink stays the instant
 # fallback and the default when the bundle is absent.
-#   ALW_GL_BACKEND=angle  -> ANGLE (Vulkan/Turnip)     ALW_GL_BACKEND=zink -> Mesa Zink
+#   ALW_GL_BACKEND=angle     -> ANGLE (Vulkan/Turnip)
+#   ALW_GL_BACKEND=freedreno -> Mesa freedreno Gallium on /dev/kgsl-3d0 (no Vulkan)
+#   ALW_GL_BACKEND=zink      -> Mesa Zink over Turnip Vulkan
 if [ -z "${'$'}ALW_GL_BACKEND" ]; then
     if [ -d /opt/angle/lib ]; then ALW_GL_BACKEND=angle; else ALW_GL_BACKEND=zink; fi
 fi
 export ALW_GL_BACKEND
 case "${'$'}ALW_GL_BACKEND" in
+    freedreno)
+        # Renders GL/GLES straight on the Adreno: the guest Mesa ships kgsl_dri.so and
+        # eglinfo reports "EGL driver name: kgsl", renderer "Adreno (TM) 825", ES 3.2 and
+        # GL 4.6 core. Assigned unconditionally so an inherited zink override cannot win.
+        export MESA_LOADER_DRIVER_OVERRIDE=kgsl
+        export GALLIUM_DRIVER=kgsl
+        export LIBGL_ALWAYS_SOFTWARE=0
+        # TASK-035: the host presents committed dma-bufs with a linear mmap upload,
+        # so freedreno must not render tiled/UBWC or the frame shears into macro
+        # tiles. sysmem+noubwc keeps every guest surface linear.
+        export FD_MESA_DEBUG="${'$'}{FD_MESA_DEBUG:-sysmem,noubwc}"
+        ;;
     angle)
         if [ -d /opt/angle/lib ]; then
             LD_LIBRARY_PATH="/opt/angle/lib${'$'}{LD_LIBRARY_PATH:+:${'$'}LD_LIBRARY_PATH}"

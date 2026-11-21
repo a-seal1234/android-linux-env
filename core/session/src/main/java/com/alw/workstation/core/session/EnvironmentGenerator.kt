@@ -36,6 +36,7 @@ object EnvironmentGenerator {
             StackProfile.DriverMode.TURNIP_KGSL,
             StackProfile.DriverMode.TURNIP_ZINK,
             StackProfile.DriverMode.ADRENO_PROPRIETARY_ZINK -> "gles2"
+            StackProfile.DriverMode.FREEDRENO_KGSL -> "gles2"
             StackProfile.DriverMode.LLVMPIPE -> "pixman"
             StackProfile.DriverMode.VIRGL -> "gles2"
         }
@@ -90,6 +91,24 @@ object EnvironmentGenerator {
                 env["MESA_LOADER_DRIVER_OVERRIDE"] = "zink"
                 env["GALLIUM_DRIVER"] = "zink"
             }
+            StackProfile.DriverMode.FREEDRENO_KGSL -> {
+                // Direct GL/GLES on the Adreno via Mesa's freedreno Gallium driver: no
+                // Vulkan, hence no Zink WSI/explicit-sync fence path. Turnip stays
+                // exported so Vulkan applications keep working.
+                val icdPath = "/opt/drivers/turnip/active/freedreno_icd.aarch64.json"
+                env["VK_ICD_FILENAMES"] = icdPath
+                env["VK_DRIVER_FILES"] = icdPath
+                env["MESA_LOADER_DRIVER_OVERRIDE"] = "kgsl"
+                env["GALLIUM_DRIVER"] = "kgsl"
+                env["LIBGL_ALWAYS_SOFTWARE"] = "0"
+                // The host bridge presents guest dma-bufs by mmap + linear upload
+                // (Android EGL has no EGL_EXT_image_dma_buf_import, and gralloc
+                // rejects a raw dma_heap handle), so the buffer contents must be
+                // linear. freedreno otherwise renders tiled/UBWC and the frame
+                // arrives as macro-tile shear; sysmem+noubwc keeps it linear.
+                // Verified on-device 2026-11-21 (TASK-035).
+                env["FD_MESA_DEBUG"] = "sysmem,noubwc"
+            }
             StackProfile.DriverMode.LLVMPIPE -> {
                 env["MESA_LOADER_DRIVER_OVERRIDE"] = "llvmpipe"
                 env["GALLIUM_DRIVER"] = "llvmpipe"
@@ -100,9 +119,13 @@ object EnvironmentGenerator {
             }
         }
 
-        // Custom mesa loader override if explicitly specified
-        profile.gpu.mesaLoaderOverride?.let {
-            env["MESA_LOADER_DRIVER_OVERRIDE"] = it
+        // Custom mesa loader override if explicitly specified. The freedreno driver mode
+        // owns the loader name, so a leftover "zink" in the profile cannot pull guest
+        // GL back onto the Vulkan path.
+        if (profile.gpu.driverMode != StackProfile.DriverMode.FREEDRENO_KGSL) {
+            profile.gpu.mesaLoaderOverride?.let {
+                env["MESA_LOADER_DRIVER_OVERRIDE"] = it
+            }
         }
 
         // 6. Low-Latency Audio Subsystem (PulseAudio & PipeWire)
@@ -159,8 +182,12 @@ object EnvironmentGenerator {
             else -> Unit
         }
 
+        // freedreno initializes GBM EGL on the PRoot virtual DRM node (verified
+        // on-device), so it is the one accelerated mode where the compositor is not
+        // demoted to kms_swrast.
         if (profile.compositor.type == StackProfile.CompositorType.HYPRLAND &&
-            profile.gpu.driverMode != StackProfile.DriverMode.LLVMPIPE
+            profile.gpu.driverMode != StackProfile.DriverMode.LLVMPIPE &&
+            profile.gpu.driverMode != StackProfile.DriverMode.FREEDRENO_KGSL
         ) {
             if (profile.gpu.forceCompositorZink) {
                 // TASK-026 Phase 3b research path: put the compositor itself on

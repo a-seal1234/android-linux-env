@@ -97,9 +97,10 @@ fun SessionSurfaceScreen(
             }
         )
 
-        var renderScaleIndex by remember { mutableIntStateOf(1) }
         var ctrlLatched by remember { mutableStateOf(false) }
+        // Render scale presets; the session starts at native 1.0x.
         val renderScales = remember { listOf(0.5f, 0.75f, 0.85f, 1.0f) }
+        var renderScaleIndex by remember { mutableIntStateOf(renderScales.lastIndex) }
 
         // Collapsible Floating Control Pill Overlay (hosted in Popup to float above SurfaceView)
         Popup(

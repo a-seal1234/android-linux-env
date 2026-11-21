@@ -11,7 +11,7 @@ ShellRoot {
     id: root
 
     property string fpsValue: "--"
-    property string scaleValue: "0.75"
+    property string scaleValue: "1.00"
     property string resValue: ""
 
     function refresh(raw) {

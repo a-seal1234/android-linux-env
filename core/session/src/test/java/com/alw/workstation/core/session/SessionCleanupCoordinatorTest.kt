@@ -134,6 +134,78 @@ class SessionCleanupCoordinatorTest {
     }
 
     @Test
+    fun appSpawnedProotLauncherIsTerminatedByCloseAll() {
+        // PRoot is never reparented: a previous session's launcher is still a direct
+        // child of the app. Close All Sessions must kill it, otherwise its compositor
+        // children keep a stale socket alive.
+        val signals = mutableListOf<Int>()
+        val coordinator = SessionCleanupCoordinator(
+            signalSender = { pid, _ -> signals.add(pid) },
+            processLister = {
+                listOf(
+                    GuestProcessReaper.GuestProcess(pid = 601, ppid = 100, uid = TEST_UID, name = "lib_proot.so")
+                )
+            },
+            sleeper = {},
+            myPid = 100,
+            myUid = TEST_UID,
+            isPidAlive = { false }
+        )
+
+        coordinator.closeAllSessions(emptyList())
+
+        assertTrue(signals.contains(601))
+    }
+
+    @Test
+    fun preLaunchReaperLeavesAppSpawnedProotAlone() {
+        val killed = mutableListOf<Int>()
+        val reaper = GuestProcessReaper(
+            myPid = 100,
+            myUid = TEST_UID,
+            processLister = {
+                listOf(
+                    GuestProcessReaper.GuestProcess(pid = 701, ppid = 100, uid = TEST_UID, name = "lib_proot.so")
+                )
+            },
+            parentAlive = { true },
+            killer = { killed.add(it) }
+        )
+
+        reaper.reapOrphanedGuests()
+
+        assertTrue("pre-launch sweep must not kill a live session's PRoot", killed.isEmpty())
+    }
+
+    @Test
+    fun preservedBridgeSocketSurvivesPurge() {
+        // Deleting the live bridge's wayland-0 makes the next compositor abort with
+        // CBackend::create() failed! (observed on-device).
+        val runtime = tempFolder.newFolder("rt-preserve")
+        val bridgeSocket = File(runtime, "wayland-0")
+        bridgeSocket.createNewFile()
+        val staleLock = File(runtime, "wayland-0.lock")
+        staleLock.createNewFile()
+        val hyprLock = File(runtime, SessionCleanupCoordinator.HYPRLAND_LOCK)
+        hyprLock.createNewFile()
+
+        val coordinator = SessionCleanupCoordinator(
+            signalSender = { _, _ -> },
+            processLister = { emptyList() },
+            sleeper = {}
+        )
+        val purged = coordinator.purgeArtifacts(
+            listOf(runtime),
+            preservedPaths = setOf(bridgeSocket.absolutePath)
+        )
+
+        assertTrue("bridge socket must survive", bridgeSocket.exists())
+        assertFalse(staleLock.exists())
+        assertFalse(hyprLock.exists())
+        assertEquals(2, purged.size)
+    }
+
+    @Test
     fun emptyStateReportsNoWork() {
         val coordinator = SessionCleanupCoordinator(
             signalSender = { _, _ -> },

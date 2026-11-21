@@ -9,7 +9,7 @@ ShellRoot {
     id: root
 
     property string fpsValue: "--"
-    property string scaleValue: "0.75"
+    property string scaleValue: "1.00"
 
     function refresh(raw) {
         var f = raw.match(/fps=(\d+)/)

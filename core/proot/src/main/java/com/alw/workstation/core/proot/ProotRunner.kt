@@ -300,9 +300,16 @@ class ProotRunner(
 
         // TASK-038: explicit backend for non-shim launches (Hyprland autostart also goes
         // through alw-gui-run, but /usr/bin/env -i would drop an outside variable).
+        // The freedreno driver mode owns the whole-session GL backend; every other mode
+        // keeps the ANGLE/Zink selection. `ALW_GL_BACKEND` in the profile's
+        // environmentOverrides still wins (one-line rollback to Zink).
         env["ALW_GL_BACKEND"] =
             profile.gpu.environmentOverrides["ALW_GL_BACKEND"]
-                ?: if (angleInstalled) "angle" else "zink"
+                ?: when {
+                    profile.gpu.driverMode == StackProfile.DriverMode.FREEDRENO_KGSL -> "freedreno"
+                    angleInstalled -> "angle"
+                    else -> "zink"
+                }
 
         args.add("/usr/bin/env")
         args.add("-i")

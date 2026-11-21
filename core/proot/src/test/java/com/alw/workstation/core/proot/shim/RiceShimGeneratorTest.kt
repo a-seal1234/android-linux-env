@@ -65,6 +65,22 @@ class RiceShimGeneratorTest {
     }
 
     @Test
+    fun testGuiRunShimOffersFreedrenoBackend() {
+        val shim = RiceShimGenerator.ALW_GUI_RUN_SHIM
+
+        // freedreno renders GL/GLES directly on /dev/kgsl-3d0 (no Vulkan/Zink layer),
+        // while ANGLE and Zink stay selectable through the same variable.
+        assertTrue(shim.contains("freedreno)"))
+        assertTrue(shim.contains("export MESA_LOADER_DRIVER_OVERRIDE=kgsl"))
+        assertTrue(shim.contains("export GALLIUM_DRIVER=kgsl"))
+        // Linear sysmem rendering is required by the bridge's dma-buf upload path.
+        assertTrue(shim.contains("FD_MESA_DEBUG"))
+        assertTrue(shim.contains("sysmem,noubwc"))
+        assertTrue(shim.contains("ALW_GL_BACKEND=zink"))
+        assertTrue(shim.contains("ANGLE_DEFAULT_PLATFORM=vulkan"))
+    }
+
+    @Test
     fun testRiceHostShimsContent() {
         val query = RiceShimGenerator.ALW_HOST_QUERY_SHIM
         assertTrue(query.contains("/alw-host.sock"))
