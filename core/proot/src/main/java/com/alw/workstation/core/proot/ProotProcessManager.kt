@@ -34,6 +34,7 @@ class ProotProcessManager(
     )
 
     interface ProcessListener {
+        fun onProcessSpawned(pid: Long) {}
         fun onStdoutLine(line: String) {}
         fun onStderrLine(line: String) {}
         fun onProcessExited(exitCode: Int) {}
@@ -203,6 +204,10 @@ class ProotProcessManager(
         )
         managedRef = managed
 
+        managed.pid()?.let { pid ->
+            listener?.onProcessSpawned(pid)
+        }
+
         stdoutThread.start()
         stderrThread.start()
 
@@ -226,12 +231,17 @@ class ProotProcessManager(
         command: ProotRunner.LaunchCommand,
         timeoutMs: Long = 60_000,
         onStdoutLine: ((String) -> Unit)? = null,
-        onStderrLine: ((String) -> Unit)? = null
+        onStderrLine: ((String) -> Unit)? = null,
+        onProcessSpawned: ((Long) -> Unit)? = null
     ): ExecutionResult = withContext(ioDispatcher) {
         val stdoutLines = CopyOnWriteArrayList<String>()
         val stderrLines = CopyOnWriteArrayList<String>()
 
         val listener = object : ProcessListener {
+            override fun onProcessSpawned(pid: Long) {
+                onProcessSpawned?.invoke(pid)
+            }
+
             override fun onStdoutLine(line: String) {
                 stdoutLines.add(line)
                 onStdoutLine?.invoke(line)

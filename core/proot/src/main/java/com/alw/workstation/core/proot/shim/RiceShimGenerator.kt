@@ -276,19 +276,8 @@ fi
 exit 0
 """
 
-    const val ALW_GUI_RUN_SHIM = """#!/bin/sh
-# ALW: launch a GUI client against the nested compositor's Wayland socket.
-# Hyprland does not always propagate WAYLAND_DISPLAY to exec_cmd children, and the
-# bridge owns wayland-0 while the compositor takes the next free name; resolve the
-# newest compositor socket explicitly before exec.
-RUNTIME="${'$'}{XDG_RUNTIME_DIR:-/tmp/rt}"
-if [ -z "${'$'}WAYLAND_DISPLAY" ] || [ ! -S "${'$'}RUNTIME/${'$'}WAYLAND_DISPLAY" ]; then
-    SOCK="$(ls -t "${'$'}RUNTIME"/wayland-* 2>/dev/null | grep -v '\\.lock${'$'}' | head -1)"
-    if [ -n "${'$'}SOCK" ]; then
-        WAYLAND_DISPLAY="$(basename "${'$'}SOCK")"
-        export WAYLAND_DISPLAY
-    fi
-fi
+    const val RENDERER_ENV_SHIM = """#!/bin/sh
+# 10-alw-renderer.sh: Adreno GPU and Turnip/Vulkan/Zink/freedreno/ANGLE renderer configuration.
 # Guest applications render on the Adreno 825 through Turnip (Vulkan).
 # The compositor itself stays on kms_swrast (GBM EGL init fails with zink on the
 # PRoot virtual DRM node), so the accelerated path is applied per application.
@@ -341,6 +330,30 @@ esac
 if [ "${'$'}ALW_GL_BACKEND" = "zink" ]; then
     export MESA_LOADER_DRIVER_OVERRIDE="${'$'}{MESA_LOADER_DRIVER_OVERRIDE:-zink}"
     export GALLIUM_DRIVER="${'$'}{GALLIUM_DRIVER:-zink}"
+fi
+"""
+
+    const val ALW_GUI_RUN_SHIM = """#!/bin/sh
+# ALW: launch a GUI client against the nested compositor's Wayland socket.
+# Hyprland does not always propagate WAYLAND_DISPLAY to exec_cmd children, and the
+# bridge owns wayland-0 while the compositor takes the next free name; resolve the
+# newest compositor socket explicitly before exec.
+RUNTIME="${'$'}{XDG_RUNTIME_DIR:-/tmp/rt}"
+if [ -z "${'$'}WAYLAND_DISPLAY" ] || [ ! -S "${'$'}RUNTIME/${'$'}WAYLAND_DISPLAY" ]; then
+    SOCK="$(ls -t "${'$'}RUNTIME"/wayland-* 2>/dev/null | grep -v '\\.lock${'$'}' | head -1)"
+    if [ -n "${'$'}SOCK" ]; then
+        WAYLAND_DISPLAY="$(basename "${'$'}SOCK")"
+        export WAYLAND_DISPLAY
+    fi
+fi
+
+# Modular environment scripts: source all /etc/alw/env.d/*.sh in lexical order
+if [ -d /etc/alw/env.d ]; then
+    for f in /etc/alw/env.d/*.sh; do
+        if [ -r "${'$'}f" ]; then
+            . "${'$'}f"
+        fi
+    done
 fi
 
 # TASK-036 Phase 3: Firefox isolation. Scoped to the Firefox binary path so no other
@@ -764,6 +777,27 @@ exec "${'$'}@"
             try {
                 file.setReadable(true, false)
                 file.setExecutable(true, false)
+            } catch (_: Throwable) {}
+        }
+    }
+
+    /**
+     * Materializes modular environment scripts into /etc/alw/env.d/.
+     */
+    fun installEnvShims(targetDir: File) {
+        if (!targetDir.exists()) {
+            targetDir.mkdirs()
+        }
+
+        val envShims = mapOf(
+            "10-alw-renderer.sh" to RENDERER_ENV_SHIM
+        )
+
+        for ((name, content) in envShims) {
+            val file = File(targetDir, name)
+            file.writeText(content)
+            try {
+                file.setReadable(true, false)
             } catch (_: Throwable) {}
         }
     }

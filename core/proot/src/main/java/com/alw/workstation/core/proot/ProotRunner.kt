@@ -21,7 +21,10 @@ class ProotRunner(
     private val fakeFsManager: com.alw.workstation.core.proot.fakefs.FakeFsManager =
         com.alw.workstation.core.proot.fakefs.FakeFsManager(dirs),
     private val angleBundleManager: com.alw.workstation.core.proot.driver.AngleBundleManager =
-        com.alw.workstation.core.proot.driver.AngleBundleManager(dirs)
+        com.alw.workstation.core.proot.driver.AngleBundleManager(dirs),
+    val contributors: List<ProotLaunchContributor> = listOf(
+        AngleBundleContributor(dirs, angleBundleManager)
+    )
 ) {
     companion object {
         private const val TAG = "ALW::ProotRunner"
@@ -113,9 +116,11 @@ class ProotRunner(
             )
         }
 
-        // Materialize PRoot rice compatibility shims (systemctl, fakeroot, makepkg, sudo) in /usr/local/bin
+        // Materialize PRoot rice compatibility shims in /usr/local/bin and /etc/alw/env.d
         val guestLocalBin = File(rootfsDir, "usr/local/bin")
+        val guestEnvDir = File(rootfsDir, "etc/alw/env.d")
         com.alw.workstation.core.proot.shim.RiceShimGenerator.installShims(guestLocalBin)
+        com.alw.workstation.core.proot.shim.RiceShimGenerator.installEnvShims(guestEnvDir)
 
         // Deploy the Quickshell FPS pill (TASK-026). ConfigSynthesizer autostarts
         // `qs -c alw-fps`, so the shell must exist in both guest homes after a fresh
@@ -228,16 +233,19 @@ class ProotRunner(
             args.add(mount.toCliArg())
         }
 
-        // 8b. Google ANGLE guest GLES bundle (TASK-038). Bound only when a validated
-        // bundle is active; the alw-gui-run shim then selects it through
-        // ALW_GL_BACKEND/ANGLE_DEFAULT_PLATFORM and Mesa Zink stays the fallback.
-        val angleInstalled = angleBundleManager.isBundleInstalled()
-        if (angleInstalled) {
-            val angleLibDir = angleBundleManager.activeLibraryDir()
-            val guestAngleDir = File(rootfsDir, "opt/angle/lib")
-            if (!guestAngleDir.exists()) guestAngleDir.mkdirs()
-            args.add("-b")
-            args.add("${angleLibDir.absolutePath}:/opt/angle/lib")
+        // 8b. Modular ProotLaunchContributor pipeline: extra bind mounts
+        val sortedContributors = contributors.sortedBy { it.priority }
+        for (contributor in sortedContributors) {
+            for (mount in contributor.extraBindMounts(profile, rootfsDir, dirs)) {
+                mount.guestPath?.let { gp ->
+                    val target = File(rootfsDir, gp.removePrefix("/"))
+                    if (!target.exists()) {
+                        target.mkdirs()
+                    }
+                }
+                args.add("-b")
+                args.add(mount.toCliArg())
+            }
         }
 
         // 9. Optional x86_64 emulation hook & shared overlay bind-mount
@@ -298,18 +306,10 @@ class ProotRunner(
             EnvironmentGenerator.generateEnvironment(profile, sessionRuntimeDir)
         }.toMutableMap()
 
-        // TASK-038: explicit backend for non-shim launches (Hyprland autostart also goes
-        // through alw-gui-run, but /usr/bin/env -i would drop an outside variable).
-        // The freedreno driver mode owns the whole-session GL backend; every other mode
-        // keeps the ANGLE/Zink selection. `ALW_GL_BACKEND` in the profile's
-        // environmentOverrides still wins (one-line rollback to Zink).
-        env["ALW_GL_BACKEND"] =
-            profile.gpu.environmentOverrides["ALW_GL_BACKEND"]
-                ?: when {
-                    profile.gpu.driverMode == StackProfile.DriverMode.FREEDRENO_KGSL -> "freedreno"
-                    angleInstalled -> "angle"
-                    else -> "zink"
-                }
+        // Contributors pipeline: extra environment variables
+        for (contributor in sortedContributors) {
+            env.putAll(contributor.extraEnvVars(profile, dirs))
+        }
 
         args.add("/usr/bin/env")
         args.add("-i")
@@ -377,5 +377,14 @@ class ProotRunner(
             environment = runnerEnv,
             workingDir = rootfsDir
         )
+    }
+
+    /**
+     * Dispatches process spawned notification across all contributors in priority order.
+     */
+    fun onProcessSpawned(pid: Long, profile: StackProfile) {
+        contributors.sortedBy { it.priority }.forEach { contributor ->
+            contributor.onProcessSpawned(pid, profile)
+        }
     }
 }

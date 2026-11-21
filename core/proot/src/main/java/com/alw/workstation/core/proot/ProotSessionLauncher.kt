@@ -24,7 +24,10 @@ class ProotSessionLauncher(
             command = cmd,
             timeoutMs = timeoutMs,
             onStdoutLine = onStdoutLine,
-            onStderrLine = onStderrLine
+            onStderrLine = onStderrLine,
+            onProcessSpawned = { pid ->
+                runner.onProcessSpawned(pid, profile)
+            }
         )
         return result.exitCode
     }

@@ -66,7 +66,10 @@ class RiceShimGeneratorTest {
 
     @Test
     fun testGuiRunShimOffersFreedrenoBackend() {
-        val shim = RiceShimGenerator.ALW_GUI_RUN_SHIM
+        val guiRun = RiceShimGenerator.ALW_GUI_RUN_SHIM
+        assertTrue(guiRun.contains("/etc/alw/env.d/*.sh"))
+
+        val shim = RiceShimGenerator.RENDERER_ENV_SHIM
 
         // freedreno renders GL/GLES directly on /dev/kgsl-3d0 (no Vulkan/Zink layer),
         // while ANGLE and Zink stay selectable through the same variable.
@@ -78,6 +81,18 @@ class RiceShimGeneratorTest {
         assertTrue(shim.contains("sysmem,noubwc"))
         assertTrue(shim.contains("ALW_GL_BACKEND=zink"))
         assertTrue(shim.contains("ANGLE_DEFAULT_PLATFORM=vulkan"))
+    }
+
+    @Test
+    fun testInstallEnvShims() {
+        val envDir = tempFolder.newFolder("env_d")
+        RiceShimGenerator.installEnvShims(envDir)
+
+        val rendererFile = File(envDir, "10-alw-renderer.sh")
+        assertTrue("10-alw-renderer.sh must exist", rendererFile.isFile)
+        val content = rendererFile.readText()
+        assertTrue(content.contains("freedreno)"))
+        assertTrue(content.contains("ALW_GL_BACKEND"))
     }
 
     @Test
