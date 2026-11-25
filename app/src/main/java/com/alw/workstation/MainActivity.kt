@@ -2,6 +2,7 @@ package com.alw.workstation
 
 import android.content.Intent
 import android.os.Bundle
+import java.io.File
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
@@ -148,6 +149,17 @@ class MainActivity : ComponentActivity() {
             profileRepository = profileRepository
         )
 
+        val prootAppLauncher = com.alw.workstation.core.proot.ProotAppLauncher(
+            runner = prootRunner,
+            processManager = processManager,
+            profileProvider = {
+                val state = sessionController.sessionState.value
+                if (state is SessionState.Running) state.profile
+                else profileRepository.listProfiles().firstOrNull()
+            },
+            runtimeDirProvider = { File(dirs.fakefsBaseDir, "tmp/rt") }
+        )
+
         dashboardViewModel = DashboardViewModel(
             dirs = dirs,
             rootfsManager = rootfsManager,
@@ -161,7 +173,8 @@ class MainActivity : ComponentActivity() {
             serverManager = serverManager,
             appContext = applicationContext,
             sessionWindowProvider = { window },
-            guestProcessReaper = com.alw.workstation.core.session.GuestProcessReaper()
+            guestProcessReaper = com.alw.workstation.core.session.GuestProcessReaper(),
+            appSpawnHandler = prootAppLauncher
         )
 
         stackConfiguratorViewModel = StackConfiguratorViewModel(

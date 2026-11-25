@@ -7,9 +7,11 @@ import java.io.File
 /**
  * Launch contributor for runtime performance tuning and CPU core pinning (TASK-036).
  *
- * Restricts Malloc arenas to 2 to minimize memory fragmentation under PRoot,
- * unsets PROOT_NO_SECCOMP to enable seccomp filtering acceleration,
+ * Restricts Malloc arenas to 2 to minimize memory fragmentation under PRoot
  * and pins PRoot guest process trees to performance cores (CPUs 3-7, mask 0xf8).
+ * Note: PROOT_NO_SECCOMP=1 must remain set on Android 15+ because Zygote's
+ * app seccomp filter (SECCOMP_RET_TRAP) takes precedence over PRoot's
+ * SECCOMP_RET_TRACE and kills guest processes with SIGSYS (signal 31).
  */
 class CorePinningContributor(
     private val dirs: RuntimeDirectories,
@@ -23,10 +25,6 @@ class CorePinningContributor(
         dirs: RuntimeDirectories
     ): Map<String, String> {
         return mapOf("MALLOC_ARENA_MAX" to "2")
-    }
-
-    override fun runnerEnvOverrides(): Map<String, String?> {
-        return mapOf("PROOT_NO_SECCOMP" to null)
     }
 
     override fun onProcessSpawned(pid: Long, profile: StackProfile) {

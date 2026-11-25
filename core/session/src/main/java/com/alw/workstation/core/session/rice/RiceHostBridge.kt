@@ -37,13 +37,20 @@ interface RiceGraphicsControl {
 }
 
 class RiceHostBridge(
-    private val context: Context,
+    private val context: Context? = null,
     private val socketFile: File,
     private val sysfsRoot: File? = null,
     private val windowProvider: (() -> Window?)? = null,
     private val sysfsRefreshMillis: Long = 10_000L,
-    private val graphics: RiceGraphicsControl? = null
+    private val graphics: RiceGraphicsControl? = null,
+    private val appSpawnHandler: AppSpawnHandler? = null
 ) {
+    /**
+     * Handler for spawning isolated guest applications in separate PRoot processes (TASK-040).
+     */
+    fun interface AppSpawnHandler {
+        fun spawnApp(command: String, args: List<String>): Result<Long>
+    }
     companion object {
         const val TAG = "ALW::RiceHostBridge"
         const val SOCKET_NAME = "alw-host.sock"
@@ -182,12 +189,26 @@ class RiceHostBridge(
                 "fps" -> fps()
                 "scale" -> scale(parts)
                 "open" -> open(parts.drop(1).joinToString(" "))
+                "app_spawn", "app-spawn" -> appSpawn(parts.drop(1))
                 else -> "error=unknown-command\n"
             }
         } catch (e: Throwable) {
             Log.w(TAG, "command '$request' failed: ${e.message}")
             "error=${e.message ?: "failed"}\n"
         }
+    }
+
+    // --- app spawn ---------------------------------------------------------
+
+    private fun appSpawn(parts: List<String>): String {
+        if (parts.isEmpty()) return "error=missing-command\n"
+        val handler = appSpawnHandler ?: return "error=no-spawn-handler\n"
+        val cmd = parts[0]
+        val args = parts.drop(1)
+        return handler.spawnApp(cmd, args).fold(
+            onSuccess = { pid -> "ok=1 pid=$pid\n" },
+            onFailure = { err -> "error=${err.message ?: "spawn-failed"}\n" }
+        )
     }
 
     // --- graphics ----------------------------------------------------------
@@ -218,8 +239,9 @@ class RiceHostBridge(
     // --- battery -----------------------------------------------------------
 
     fun readBattery(): BatterySnapshot {
-        val manager = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
-        val sticky = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val ctx = context ?: return BatterySnapshot(0, "Unknown", false, 0L, 0L, 0)
+        val manager = ctx.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+        val sticky = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
 
         val level = sticky?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
         val scale = sticky?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
@@ -312,7 +334,7 @@ class RiceHostBridge(
     // --- volume ------------------------------------------------------------
 
     private fun audioManager(): AudioManager? =
-        context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        context?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
 
     fun readVolume(): VolumeSnapshot {
         val audio = audioManager() ?: return VolumeSnapshot(0, false)
@@ -367,7 +389,7 @@ class RiceHostBridge(
     // --- network -----------------------------------------------------------
 
     fun networkSnapshot(): Map<String, String> {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val cm = context?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
         val active = cm?.activeNetwork
         val caps = active?.let { cm.getNetworkCapabilities(it) }
         val link = active?.let { cm.getLinkProperties(it) }
@@ -388,7 +410,7 @@ class RiceHostBridge(
         var signal = 0
         if (transport == "wifi") {
             try {
-                val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                val wifi = context?.applicationContext?.getSystemService(Context.WIFI_SERVICE) as? WifiManager
                 val info = wifi?.connectionInfo
                 val raw = info?.ssid ?: ""
                 ssid = raw.trim('"').takeUnless { it == "<unknown ssid>" || it == "0x" } ?: ""
@@ -428,7 +450,7 @@ class RiceHostBridge(
             val intent = Intent(Intent.ACTION_VIEW, uri).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            context.startActivity(intent)
+            context?.startActivity(intent) ?: return "error=no-context\n"
             "ok=1\n"
         } catch (e: Throwable) {
             Log.w(TAG, "open '$target' failed: ${e.message}")

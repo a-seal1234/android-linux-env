@@ -474,9 +474,15 @@ export QTWEBENGINE_DISABLE_SANDBOX=1
 
 has_nosandbox=0
 has_nodevshm=0
+has_ozone=0
+has_userdatadir=0
 for arg in "${'$'}@"; do
     if [ "${'$'}arg" = "--no-sandbox" ]; then has_nosandbox=1; fi
     if [ "${'$'}arg" = "--disable-dev-shm-usage" ]; then has_nodevshm=1; fi
+    case "${'$'}arg" in
+        --ozone-platform*) has_ozone=1 ;;
+        --user-data-dir*) has_userdatadir=1 ;;
+    esac
 done
 
 EXTRA_ARGS=""
@@ -486,8 +492,73 @@ fi
 if [ "${'$'}has_nodevshm" -eq 0 ]; then
     EXTRA_ARGS="${'$'}EXTRA_ARGS --disable-dev-shm-usage"
 fi
+if [ "${'$'}has_ozone" -eq 0 ] && [ -n "${'$'}WAYLAND_DISPLAY" ]; then
+    EXTRA_ARGS="${'$'}EXTRA_ARGS --ozone-platform=wayland"
+fi
+if [ "${'$'}has_userdatadir" -eq 0 ] && [ "${'$'}(id -u 2>/dev/null || echo 0)" -eq 0 ]; then
+    case "$binaryName" in
+        code|code-oss|antigravity)
+            EXTRA_ARGS="${'$'}EXTRA_ARGS --user-data-dir=${'$'}{HOME:-/home/alw}/.config/$binaryName-root"
+            ;;
+    esac
+fi
+
+# TASK-040: Delegate to alw-app-exec for crash isolation if ALW_ISOLATED is not set
+if [ -z "${'$'}ALW_ISOLATED" ] && [ -x /usr/local/bin/alw-app-exec ]; then
+    export ALW_ISOLATED=1
+    exec /usr/local/bin/alw-app-exec "${'$'}REAL_BIN" ${'$'}EXTRA_ARGS "${'$'}@"
+fi
 
 exec "${'$'}REAL_BIN" ${'$'}EXTRA_ARGS "${'$'}@"
+"""
+
+    const val ALW_APP_EXEC_SHIM = """#!/bin/sh
+# ALW Isolated App Executor (TASK-040)
+# Requests the Android host service to spawn the target command in a dedicated,
+# isolated PRoot instance with its own independent ptrace domain.
+# This prevents application crashes or seccomp panics from bringing down Hyprland.
+SOCK="${'$'}{XDG_RUNTIME_DIR:-/tmp/rt}/alw-host.sock"
+
+if [ -z "${'$'}1" ]; then
+    echo "Usage: alw-app-exec <command> [args...]" >&2
+    exit 1
+fi
+
+if [ -S "${'$'}SOCK" ] && [ -z "${'$'}ALW_ISOLATED" ]; then
+    RESP="${'$'}(python3 - "${'$'}SOCK" "${'$'}@" <<'ALWPY'
+import socket, sys
+path = sys.argv[1]
+cmd = " ".join(sys.argv[2:])
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(5)
+try:
+    s.connect(path)
+    s.sendall(f"app_spawn {cmd}\n".encode())
+    out = b""
+    while True:
+        chunk = s.recv(4096)
+        if not chunk:
+            break
+        out += chunk
+    resp = out.decode(errors="replace").strip()
+    if resp.startswith("ok=1"):
+        print(resp)
+        sys.exit(0)
+    else:
+        sys.stderr.write(f"alw-app-exec: host returned {resp}\n")
+        sys.exit(1)
+except Exception as e:
+    sys.stderr.write(f"alw-app-exec: connection error: {e}\n")
+    sys.exit(2)
+ALWPY
+    )"
+    if [ $? -eq 0 ]; then
+        exit 0
+    fi
+fi
+
+# Fallback: run directly in the current session
+exec alw-gui-run "${'$'}@"
 """
 
     const val ALW_GUI_RUN_SHIM = """#!/bin/sh
@@ -855,6 +926,12 @@ if [ ! -w /dev/shm ] 2>/dev/null; then
     echo "alw-firefox: /dev/shm is not writable; Firefox will abort (SIGBUS)" >&2
 fi
 
+# TASK-040: Delegate to alw-app-exec for crash isolation if ALW_ISOLATED is not set
+if [ -z "${'$'}ALW_ISOLATED" ] && [ -x /usr/local/bin/alw-app-exec ]; then
+    export ALW_ISOLATED=1
+    exec /usr/local/bin/alw-app-exec "${'$'}BIN" "${'$'}@"
+fi
+
 exec "${'$'}BIN" "${'$'}@"
 """
 
@@ -919,6 +996,8 @@ exec "${'$'}@"
             "makepkg" to MAKEPKG_SHIM,
             "sudo" to SUDO_SHIM,
             "alw-firefox" to FIREFOX_SHIM,
+            "firefox" to FIREFOX_SHIM,
+            "alw-app-exec" to ALW_APP_EXEC_SHIM,
             "xdg-open" to XDG_OPEN_SHIM,
             "alw-host-query" to ALW_HOST_QUERY_SHIM,
             "alw-gui-run" to ALW_GUI_RUN_SHIM,

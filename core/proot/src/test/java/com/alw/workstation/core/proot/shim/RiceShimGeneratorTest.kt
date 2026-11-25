@@ -37,6 +37,9 @@ class RiceShimGeneratorTest {
             "fakeroot",
             "makepkg",
             "sudo",
+            "alw-firefox",
+            "firefox",
+            "alw-app-exec",
             "xdg-open",
             "alw-host-query",
             "brightnessctl",
@@ -231,5 +234,31 @@ class RiceShimGeneratorTest {
     fun testSudoShimContent() {
         val content = RiceShimGenerator.SUDO_SHIM
         assertTrue(content.contains("exec \"\$@\""))
+    }
+
+    @Test
+    fun testAlwAppExecShimContent() {
+        val content = RiceShimGenerator.ALW_APP_EXEC_SHIM
+        assertTrue(content.contains("app_spawn"))
+        assertTrue(content.contains("alw-host.sock"))
+        assertTrue(content.contains("ALW_ISOLATED"))
+        assertTrue(content.contains("exec alw-gui-run \"$@\""))
+    }
+
+    @Test
+    fun testChromiumWrapperDelegatesToAlwAppExec() {
+        val content = RiceShimGenerator.generateChromiumWrapper("code")
+        assertTrue(content.contains("/usr/local/bin/alw-app-exec"))
+        assertTrue(content.contains("ALW_ISOLATED"))
+        assertTrue(content.contains("--no-sandbox"))
+        assertTrue(content.contains("--disable-dev-shm-usage"))
+    }
+
+    @Test
+    fun testFirefoxShimDelegatesToAlwAppExec() {
+        val content = RiceShimGenerator.FIREFOX_SHIM
+        assertTrue(content.contains("/usr/local/bin/alw-app-exec"))
+        assertTrue(content.contains("ALW_ISOLATED"))
+        assertTrue(content.contains("MOZ_DISABLE_CONTENT_SANDBOX=1"))
     }
 }

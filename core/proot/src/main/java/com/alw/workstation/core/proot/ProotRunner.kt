@@ -337,7 +337,8 @@ class ProotRunner(
                 execArgs.addAll(0, listOf("-c", sessionConfigPath))
         }
 
-        if ((execCmd == "Hyprland" || execCmd == "start-hyprland" ||
+        if (customExecCommand == null &&
+            (execCmd == "Hyprland" || execCmd == "start-hyprland" ||
                 profile.compositor.type == StackProfile.CompositorType.HYPRLAND) &&
             !execArgs.contains("--i-am-really-stupid")
         ) {
@@ -363,6 +364,7 @@ class ProotRunner(
         runnerEnv["PROOT_NO_SECCOMP"] = "1"
         // Enable the android_dri PRoot extension (virtual /dev/dri/renderD128, TASK-024)
         runnerEnv["ALW_ANDROID_DRI"] = "1"
+        runnerEnv["ALW_AHB_SOCKET"] = File(sessionRuntimeDir, "alw-ahb.sock").absolutePath
         // Must be present in the host-side env as well: /usr/bin/env itself is a guest glibc
         // binary whose ld.so would register rseq (SIGSYS under Android 15+ seccomp) before
         // it ever exports GLIBC_TUNABLES to its children.

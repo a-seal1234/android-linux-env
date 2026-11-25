@@ -56,7 +56,8 @@ class DashboardViewModel(
     private val appContext: Context? = null,
     private val sessionWindowProvider: (() -> Window?)? = null,
     private val guestProcessReaper: GuestProcessReaper? = null,
-    private val sessionCleanupCoordinator: SessionCleanupCoordinator = SessionCleanupCoordinator()
+    private val sessionCleanupCoordinator: SessionCleanupCoordinator = SessionCleanupCoordinator(),
+    val appSpawnHandler: RiceHostBridge.AppSpawnHandler? = null
 ) {
     private var riceHostBridge: RiceHostBridge? = null
 
@@ -382,6 +383,7 @@ class DashboardViewModel(
             socketFile = File(runtimeDir, RiceHostBridge.SOCKET_NAME),
             sysfsRoot = dirs.fakefsBaseDir,
             windowProvider = sessionWindowProvider,
+            appSpawnHandler = appSpawnHandler,
             graphics = object : com.alw.workstation.core.session.rice.RiceGraphicsControl {
                 override fun actualFps(): Float = serverManager?.let {
                     it.refreshGraphicsStats()

@@ -27,6 +27,7 @@
 #endif
 #include <android/native_window_jni.h>
 #include <android/hardware_buffer.h>
+#include <android/surface_control.h>
 #include <sys/system_properties.h>
 
 #include <sys/socket.h>
@@ -543,6 +544,7 @@ public:
         }
 
         m_running.store(true);
+        startAhbPoolServer();
         m_serverThread = std::thread(&WaylandSurfaceServer::eventLoop, this);
         m_pacingThread = std::thread(&WaylandSurfaceServer::pacingLoop, this);
 
@@ -555,6 +557,7 @@ public:
         if (!m_running.exchange(false)) return;
 
         LOGI("Stopping Wayland surface server...");
+        stopAhbPoolServer();
         wakePacingThread();
         if (m_pacingThread.joinable()) {
             m_pacingThread.join();
@@ -607,6 +610,7 @@ public:
             m_socketPath.clear();
         }
 
+        destroySurfaceControl();
         if (m_nativeWindow != nullptr) {
             ANativeWindow_release(m_nativeWindow);
             m_nativeWindow = nullptr;
@@ -621,6 +625,7 @@ public:
         // window while the presenter is live leaves it swapping into a dead buffer
         // queue (the "initializes and swaps but nothing appears" symptom), so the
         // presenter must be torn down before the window changes.
+        destroySurfaceControl();
         destroyGlPresenter();
         if (m_nativeWindow != nullptr) {
             ANativeWindow_release(m_nativeWindow);
@@ -1875,18 +1880,22 @@ public:
             if (scanCode == 58) {
                 if (isDown) m_lockedModifiers ^= modBit;
             } else {
-                if (isDown) m_depressedModifiers |= modBit;
-                else m_depressedModifiers &= ~modBit;
+                if (isDown) m_physicalModifiersDown |= modBit;
+                else m_physicalModifiersDown &= ~modBit;
             }
         }
 
-        // Android reports the effective modifier state for every key event, which
-        // recovers Ctrl+C / nano Ctrl+X when HyperOS swallows the modifier's own
-        // event. It is only merged for non-modifier keys: a modifier's ACTION_UP
-        // still carries its own bit in metaState, so trusting it there would leave
-        // the modifier stuck down. Modifier keys follow the tracked state exactly.
-        if (modBit == 0)
-            m_depressedModifiers |= modsFromMetaState(metaState);
+        uint32_t metaMods = modsFromMetaState(metaState);
+        // Non-modifier keys: synchronize physical modifier tracking with Android's metaState.
+        // If metaState shows a modifier was released, clear it from tracked physical state
+        // (recovers from missed ACTION_UP when HyperOS swallows modifier releases).
+        if (modBit == 0) {
+            if (!(metaMods & (1u << 0))) m_physicalModifiersDown &= ~(1u << 0); // Shift
+            if (!(metaMods & (1u << 2))) m_physicalModifiersDown &= ~(1u << 2); // Ctrl
+            if (!(metaMods & (1u << 3))) m_physicalModifiersDown &= ~(1u << 3); // Alt
+        }
+
+        m_depressedModifiers = m_physicalModifiersDown | metaMods;
 
         uint32_t now = nowMillis();
         uint32_t keySerial = nextSerial();
@@ -1894,6 +1903,19 @@ public:
         for (auto& pair : m_clients) {
             auto& client = pair.second;
             if (client.keyboardId > 0) {
+                // Broadcast modifiers BEFORE the key event so clients evaluate
+                // the key stroke with the current, up-to-date modifier state.
+                if (static_cast<int>(m_depressedModifiers) != client.lastSentModifiers) {
+                    WaylandMessageWriter modMsg(client.keyboardId, 4); // modifiers
+                    modMsg.putUint32(nextSerial());
+                    modMsg.putUint32(m_depressedModifiers);
+                    modMsg.putUint32(0);
+                    modMsg.putUint32(m_lockedModifiers);
+                    modMsg.putUint32(0);
+                    sendPacket(client.fd, modMsg);
+                    client.lastSentModifiers = static_cast<int>(m_depressedModifiers);
+                }
+
                 if (!client.keyboardEntered && client.activeSurfaceId > 0) {
                     WaylandMessageWriter enter(client.keyboardId, 1);
                     enter.putUint32(nextSerial());
@@ -1909,17 +1931,6 @@ public:
                 keyMsg.putUint32(static_cast<uint32_t>(scanCode));
                 keyMsg.putUint32(isDown ? 1 : 0);
                 sendPacket(client.fd, keyMsg);
-
-                if (static_cast<int>(m_depressedModifiers) != client.lastSentModifiers) {
-                    WaylandMessageWriter modMsg(client.keyboardId, 4); // modifiers
-                    modMsg.putUint32(nextSerial());
-                    modMsg.putUint32(m_depressedModifiers);
-                    modMsg.putUint32(0);
-                    modMsg.putUint32(m_lockedModifiers);
-                    modMsg.putUint32(0);
-                    sendPacket(client.fd, modMsg);
-                    client.lastSentModifiers = static_cast<int>(m_depressedModifiers);
-                }
             }
         }
     }
@@ -1932,6 +1943,7 @@ public:
         std::lock_guard<std::mutex> lock(m_inputMutex);
         std::lock_guard<std::recursive_mutex> clientLock(m_mutex);
 
+        m_physicalModifiersDown = 0;
         m_depressedModifiers = 0;
 
         for (auto& pair : m_clients) {
@@ -2263,7 +2275,7 @@ private:
     int createXkbKeymapFd(uint32_t* outSize) {
         const char* keymapStr =
             "xkb_keymap {\n"
-            "    xkb_keycodes  { include \"xfree86+aliases(qwerty)\" };\n"
+            "    xkb_keycodes  { include \"evdev+aliases(qwerty)\" };\n"
             "    xkb_types     { include \"complete\" };\n"
             "    xkb_compat    { include \"complete\" };\n"
             "    xkb_symbols   { include \"pc+us+inet(evdev)\" };\n"
@@ -2399,6 +2411,25 @@ private:
                  "guests must allocate linear (TU_DEBUG=noubwc)",
                  static_cast<unsigned long long>(plane.modifier));
             return false;
+        }
+
+        // Inverted Gralloc Pool (TASK-041): if this dma-buf came from our own
+        // AHardwareBuffer pool (alw-ahb.sock), we already hold the exact
+        // AHardwareBuffer* with vendor Gralloc metadata — present it directly
+        // via ASurfaceControl (zero EGL blit, zero mmap).
+        if (AHardwareBuffer* pooledAhb = lookupAhbByFd(plane.fd)) {
+            int acquireFence = -1;
+            struct dma_buf_export_sync_file_compat {
+                uint32_t flags;
+                int32_t fd;
+            } syncReq = { 1u /* DMA_BUF_SYNC_READ */, -1 };
+            if (ioctl(plane.fd, _IOWR('b', 2, struct dma_buf_export_sync_file_compat), &syncReq) == 0 && syncReq.fd >= 0) {
+                acquireFence = syncReq.fd;
+            }
+            if (presentAhbDirectScanout(pooledAhb, buffer->width, buffer->height, acquireFence)) {
+                return true;
+            }
+            if (acquireFence >= 0) close(acquireFence);
         }
 
         // Implicit sync: never mmap/read a plane the guest's GPU may still be writing.
@@ -3770,6 +3801,262 @@ private:
     DmabufImportProbe m_importProbe;
     std::atomic<uint64_t> m_zeroCopyFrames{0};
 
+    // --- Inverted Gralloc AHB Pool & ASurfaceControl Direct Scanout --------
+    struct AhbAllocReq {
+        uint32_t width;
+        uint32_t height;
+        uint32_t bpp;
+        uint32_t flags;
+    };
+    struct AhbAllocResp {
+        int32_t status;
+        uint32_t strideBytes;
+        uint64_t sizeBytes;
+        uint32_t slotId;
+    };
+    struct AhbPoolEntry {
+        AHardwareBuffer* ahb = nullptr;
+        int dmabufFd = -1;
+        uint64_t ino = 0;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        uint32_t strideBytes = 0;
+        uint32_t slotId = 0;
+        uint64_t lastSeq = 0;
+    };
+
+    std::mutex m_ahbMutex;
+    std::unordered_map<uint64_t, AhbPoolEntry> m_ahbByInode;
+    uint32_t m_nextAhbSlotId{1};
+    uint64_t m_ahbUseSeq{0};
+    int m_ahbServerFd{-1};
+    std::string m_ahbSocketPath;
+    std::thread m_ahbThread;
+    ASurfaceControl* m_surfaceControl{nullptr};
+    std::atomic<uint64_t> m_directScanoutFrames{0};
+
+    void destroySurfaceControl() {
+        if (m_surfaceControl != nullptr) {
+            ASurfaceTransaction* tx = ASurfaceTransaction_create();
+            if (tx != nullptr) {
+                ASurfaceTransaction_reparent(tx, m_surfaceControl, nullptr);
+                ASurfaceTransaction_apply(tx);
+                ASurfaceTransaction_delete(tx);
+            }
+            ASurfaceControl_release(m_surfaceControl);
+            m_surfaceControl = nullptr;
+        }
+    }
+
+    bool presentAhbDirectScanout(AHardwareBuffer* ahb, int width, int height, int acquireFenceFd) {
+        if (ahb == nullptr || m_nativeWindow == nullptr) return false;
+        if (m_surfaceControl == nullptr) {
+            m_surfaceControl = ASurfaceControl_createFromWindow(m_nativeWindow, "alw_desktop");
+            if (m_surfaceControl == nullptr) {
+                LOGW("ASurfaceControl_createFromWindow failed; falling back");
+                return false;
+            }
+            LOGI("ASurfaceControl direct scanout attached (%dx%d)", width, height);
+        }
+        ASurfaceTransaction* tx = ASurfaceTransaction_create();
+        if (tx == nullptr) return false;
+        ASurfaceTransaction_setVisibility(tx, m_surfaceControl, ASURFACE_TRANSACTION_VISIBILITY_SHOW);
+        ASurfaceTransaction_setBufferTransparency(tx, m_surfaceControl, ASURFACE_TRANSACTION_TRANSPARENCY_OPAQUE);
+        ASurfaceTransaction_setBuffer(tx, m_surfaceControl, ahb, acquireFenceFd);
+        ASurfaceTransaction_apply(tx);
+        ASurfaceTransaction_delete(tx);
+
+        const uint64_t count = m_directScanoutFrames.fetch_add(1, std::memory_order_relaxed) + 1;
+        m_zeroCopyFrames.fetch_add(1, std::memory_order_relaxed);
+        m_blitCounter.fetch_add(1, std::memory_order_relaxed);
+        if (count == 1 || count % 120 == 0) {
+            LOGI("ASurfaceControl direct scanout #%llu (%dx%d)",
+                 static_cast<unsigned long long>(count), width, height);
+        }
+        return true;
+    }
+
+    AHardwareBuffer* lookupAhbByFd(int fd) {
+        if (fd < 0) return nullptr;
+        struct stat st{};
+        if (fstat(fd, &st) != 0) return nullptr;
+        std::lock_guard<std::mutex> lock(m_ahbMutex);
+        auto it = m_ahbByInode.find(static_cast<uint64_t>(st.st_ino));
+        if (it == m_ahbByInode.end()) return nullptr;
+        it->second.lastSeq = ++m_ahbUseSeq;
+        return it->second.ahb;
+    }
+
+    void startAhbPoolServer() {
+        if (m_socketDir.empty()) return;
+        m_ahbSocketPath = m_socketDir + "/alw-ahb.sock";
+        unlink(m_ahbSocketPath.c_str());
+        m_ahbServerFd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        if (m_ahbServerFd < 0) {
+            LOGW("AHB pool: socket failed: %s", strerror(errno));
+            return;
+        }
+        struct sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        std::strncpy(addr.sun_path, m_ahbSocketPath.c_str(), sizeof(addr.sun_path) - 1);
+        if (bind(m_ahbServerFd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0 ||
+            listen(m_ahbServerFd, 16) < 0) {
+            LOGW("AHB pool: bind/listen %s failed: %s", m_ahbSocketPath.c_str(), strerror(errno));
+            close(m_ahbServerFd);
+            m_ahbServerFd = -1;
+            unlink(m_ahbSocketPath.c_str());
+            return;
+        }
+        chmod(m_ahbSocketPath.c_str(), 0770);
+        m_ahbThread = std::thread(&WaylandSurfaceServer::ahbPoolLoop, this);
+        LOGI("AHB pool server listening on %s", m_ahbSocketPath.c_str());
+    }
+
+    void stopAhbPoolServer() {
+        if (m_ahbServerFd >= 0) {
+            shutdown(m_ahbServerFd, SHUT_RDWR);
+            close(m_ahbServerFd);
+            m_ahbServerFd = -1;
+        }
+        if (m_ahbThread.joinable()) {
+            m_ahbThread.join();
+        }
+        if (!m_ahbSocketPath.empty()) {
+            unlink(m_ahbSocketPath.c_str());
+            m_ahbSocketPath.clear();
+        }
+        std::lock_guard<std::mutex> lock(m_ahbMutex);
+        for (auto& kv : m_ahbByInode) {
+            if (kv.second.ahb != nullptr) {
+                AHardwareBuffer_release(kv.second.ahb);
+            }
+        }
+        m_ahbByInode.clear();
+    }
+
+    void ahbPoolLoop() {
+        while (m_running.load()) {
+            struct pollfd pfd{ m_ahbServerFd, POLLIN, 0 };
+            int pr = poll(&pfd, 1, 200);
+            if (pr <= 0) continue;
+            int client = accept4(m_ahbServerFd, nullptr, nullptr, SOCK_CLOEXEC);
+            if (client < 0) continue;
+
+            AhbAllocReq req{};
+            ssize_t n = recv(client, &req, sizeof(req), MSG_WAITALL);
+            if (n == sizeof(req) && req.width > 0 && req.height > 0) {
+                AhbAllocResp resp{};
+                resp.status = -1;
+                int sendFd = -1;
+
+                AHardwareBuffer_Desc desc{};
+                desc.width = req.width;
+                desc.height = req.height;
+                desc.layers = 1;
+                // Prefer BGRA_8888 (HAL format 5) to match DRM_FORMAT_XRGB8888 / ARGB8888
+                // byte order; fall back to RGBA_8888 if Gralloc rejects BGRA.
+                desc.format = 5;
+                desc.usage = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
+                             AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER |
+                             AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY |
+                             AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN |
+                             AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN;
+
+                AHardwareBuffer* ahb = nullptr;
+                if (AHardwareBuffer_allocate(&desc, &ahb) != 0 || ahb == nullptr) {
+                    desc.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
+                    AHardwareBuffer_allocate(&desc, &ahb);
+                }
+
+                if (ahb != nullptr) {
+                    AHardwareBuffer_Desc actual{};
+                    AHardwareBuffer_describe(ahb, &actual);
+                    struct AlwNativeHandle {
+                        int version;
+                        int numFds;
+                        int numInts;
+                        int data[0];
+                    };
+                    using GetNativeHandleFn = const AlwNativeHandle* (*)(const AHardwareBuffer*);
+                    static GetNativeHandleFn s_getNativeHandle = []() -> GetNativeHandleFn {
+                        void* lib = dlopen("libandroid.so", RTLD_NOW | RTLD_LOCAL);
+                        if (lib == nullptr) return nullptr;
+                        return reinterpret_cast<GetNativeHandleFn>(
+                            dlsym(lib, "AHardwareBuffer_getNativeHandle"));
+                    }();
+                    const AlwNativeHandle* nh = s_getNativeHandle ? s_getNativeHandle(ahb) : nullptr;
+                    int dmabufFd = (nh != nullptr && nh->numFds >= 1) ? nh->data[0] : -1;
+                    struct stat st{};
+                    if (dmabufFd >= 0 && fstat(dmabufFd, &st) == 0) {
+                        uint32_t strideBytes = actual.stride * 4u;
+                        uint64_t sizeBytes = static_cast<uint64_t>(st.st_size);
+                        if (sizeBytes == 0) {
+                            sizeBytes = static_cast<uint64_t>(strideBytes) * actual.height;
+                        }
+                        {
+                            std::lock_guard<std::mutex> lock(m_ahbMutex);
+                            if (m_ahbByInode.size() >= 24) {
+                                uint64_t oldestIno = 0;
+                                uint64_t minSeq = UINT64_MAX;
+                                for (const auto& kv : m_ahbByInode) {
+                                    if (kv.second.lastSeq < minSeq) {
+                                        minSeq = kv.second.lastSeq;
+                                        oldestIno = kv.first;
+                                    }
+                                }
+                                if (oldestIno != 0) {
+                                    auto oit = m_ahbByInode.find(oldestIno);
+                                    if (oit != m_ahbByInode.end()) {
+                                        if (oit->second.ahb != nullptr) AHardwareBuffer_release(oit->second.ahb);
+                                        m_ahbByInode.erase(oit);
+                                    }
+                                }
+                            }
+                            AhbPoolEntry entry;
+                            entry.ahb = ahb;
+                            entry.dmabufFd = dmabufFd;
+                            entry.ino = static_cast<uint64_t>(st.st_ino);
+                            entry.width = actual.width;
+                            entry.height = actual.height;
+                            entry.strideBytes = strideBytes;
+                            entry.slotId = m_nextAhbSlotId++;
+                            entry.lastSeq = ++m_ahbUseSeq;
+                            m_ahbByInode[entry.ino] = entry;
+                            resp.status = 0;
+                            resp.strideBytes = strideBytes;
+                            resp.sizeBytes = sizeBytes;
+                            resp.slotId = entry.slotId;
+                            sendFd = dmabufFd;
+                            LOGI("AHB pool: allocated %ux%u stride=%u size=%llu ino=%llu slot=%u",
+                                 actual.width, actual.height, strideBytes,
+                                 static_cast<unsigned long long>(sizeBytes),
+                                 static_cast<unsigned long long>(entry.ino), entry.slotId);
+                        }
+                    } else {
+                        AHardwareBuffer_release(ahb);
+                    }
+                }
+
+                struct iovec iov{ &resp, sizeof(resp) };
+                struct msghdr msg{};
+                msg.msg_iov = &iov;
+                msg.msg_iovlen = 1;
+                char cmsgBuf[CMSG_SPACE(sizeof(int))] = {};
+                if (sendFd >= 0) {
+                    msg.msg_control = cmsgBuf;
+                    msg.msg_controllen = sizeof(cmsgBuf);
+                    struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+                    cmsg->cmsg_level = SOL_SOCKET;
+                    cmsg->cmsg_type = SCM_RIGHTS;
+                    cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+                    *reinterpret_cast<int*>(CMSG_DATA(cmsg)) = sendFd;
+                }
+                sendmsg(client, &msg, MSG_NOSIGNAL);
+            }
+            close(client);
+        }
+    }
+
     CursorImage m_cursorImage;
     std::vector<uint8_t> m_windowShadow; // clean copy of the last full frame
     int m_shadowWidth = 0;
@@ -3780,6 +4067,7 @@ private:
 
     PointerState m_pointerState;
     std::atomic<bool> m_pendingPointerMotion{false};
+    uint32_t m_physicalModifiersDown{0};
     uint32_t m_depressedModifiers{0};
     uint32_t m_lockedModifiers{0};
 };

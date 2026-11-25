@@ -39,22 +39,46 @@ class AccessibilityHealer(
 
     suspend fun heal(): HealResult = withContext(ioDispatcher) {
         val current = readEnabledServices()
-        if (isEnabledStored(current)) return@withContext HealResult.AlreadyEnabled
+        val stored = isEnabledStored(current)
+        val running = isServiceRunning()
 
-        if (tryHealViaShizuku(current)) {
+        if (stored && running) return@withContext HealResult.AlreadyEnabled
+
+        val forceToggle = stored && !running
+        if (tryHealViaShizuku(current, forceToggle = forceToggle)) {
             return@withContext HealResult.Healed
         }
-        if (tryHealViaWriteSecureSettings(current)) {
+        if (tryHealViaWriteSecureSettings(current, forceToggle = forceToggle)) {
             return@withContext HealResult.Healed
         }
         HealResult.NeedsAdb(adbGrantCommand(), adbManualCommands())
     }
 
-    private suspend fun tryHealViaShizuku(current: String?): Boolean {
+    fun isServiceRunning(): Boolean = runCatching {
+        val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? android.view.accessibility.AccessibilityManager
+            ?: return true
+        val list = am.getEnabledAccessibilityServiceList(android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+        list.any {
+            val sInfo = it.resolveInfo?.serviceInfo ?: return@any false
+            sInfo.packageName == context.packageName &&
+                (sInfo.name == SERVICE_CLASS || sInfo.name == SHORT_SERVICE_ENTRY)
+        }
+    }.getOrDefault(true)
+
+    private suspend fun tryHealViaShizuku(current: String?, forceToggle: Boolean = false): Boolean {
         val manager = shizukuManager ?: return false
         if (manager.companionState.value.state != ShizukuState.READY) return false
 
         return try {
+            if (forceToggle) {
+                shellRunner.execute(
+                    listOf(
+                        "/system/bin/settings", "put", "secure",
+                        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+                        removeServiceEntry(current)
+                    )
+                )
+            }
             val services = shellRunner.execute(
                 listOf(
                     "/system/bin/settings", "put", "secure",
@@ -81,12 +105,19 @@ class AccessibilityHealer(
         }
     }
 
-    private fun tryHealViaWriteSecureSettings(current: String?): Boolean {
+    private fun tryHealViaWriteSecureSettings(current: String?, forceToggle: Boolean = false): Boolean {
         val granted = context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) ==
             PackageManager.PERMISSION_GRANTED
         if (!granted) return false
 
         return try {
+            if (forceToggle) {
+                Settings.Secure.putString(
+                    context.contentResolver,
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+                    removeServiceEntry(current)
+                )
+            }
             Settings.Secure.putString(
                 context.contentResolver,
                 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
@@ -157,6 +188,15 @@ class AccessibilityHealer(
         /** True when the entry refers to our key-intercept service (either stored spelling). */
         fun isOurServiceEntry(entry: String): Boolean =
             entry == FLAT_SERVICE_ENTRY || entry == SHORT_SERVICE_ENTRY
+
+        /**
+         * Removes our service entry from `enabled_accessibility_services` so a toggle
+         * clears Android framework's crashed-service state.
+         */
+        fun removeServiceEntry(raw: String?): String =
+            parseEnabledServices(raw)
+                .filterNot { isOurServiceEntry(it) }
+                .joinToString(":")
 
         /**
          * Appends our service to the stored entry list. Pre-existing entries are

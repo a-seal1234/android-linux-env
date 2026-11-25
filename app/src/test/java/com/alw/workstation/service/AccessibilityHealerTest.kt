@@ -74,6 +74,24 @@ class AccessibilityHealerTest {
     }
 
     @Test
+    fun removeServiceEntryStripsOurServiceOnly() {
+        val flatOnly = AccessibilityHealer.FLAT_SERVICE_ENTRY
+        assertEquals("", AccessibilityHealer.removeServiceEntry(flatOnly))
+
+        val shortOnly = AccessibilityHealer.SHORT_SERVICE_ENTRY
+        assertEquals("", AccessibilityHealer.removeServiceEntry(shortOnly))
+
+        val multiple = "com.other.pkg/com.other.Service:" + AccessibilityHealer.FLAT_SERVICE_ENTRY
+        assertEquals("com.other.pkg/com.other.Service", AccessibilityHealer.removeServiceEntry(multiple))
+
+        val none = "com.other.pkg/com.other.Service"
+        assertEquals("com.other.pkg/com.other.Service", AccessibilityHealer.removeServiceEntry(none))
+
+        assertEquals("", AccessibilityHealer.removeServiceEntry(null))
+        assertEquals("", AccessibilityHealer.removeServiceEntry(""))
+    }
+
+    @Test
     fun storedEntryConstantsAreCanonical() {
         assertEquals(
             "com.alw.workstation/com.alw.workstation.service.AlwKeyInterceptService",

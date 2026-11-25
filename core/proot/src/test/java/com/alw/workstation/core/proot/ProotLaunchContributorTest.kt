@@ -152,8 +152,7 @@ class ProotLaunchContributorTest {
         assertEquals("2", env["MALLOC_ARENA_MAX"])
 
         val overrides = contributor.runnerEnvOverrides()
-        assertTrue(overrides.containsKey("PROOT_NO_SECCOMP"))
-        assertEquals(null, overrides["PROOT_NO_SECCOMP"])
+        assertTrue(overrides.isEmpty())
     }
 
     @Test
@@ -184,8 +183,8 @@ class ProotLaunchContributorTest {
 
         val cmd = runner.buildLaunchCommand(profile, sessionRuntimeDir)
 
-        // PROOT_NO_SECCOMP should be unset in host runner env by CorePinningContributor
-        assertFalse(cmd.environment.containsKey("PROOT_NO_SECCOMP"))
+        // PROOT_NO_SECCOMP=1 must remain set in host runner env on Android 15+
+        assertEquals("1", cmd.environment["PROOT_NO_SECCOMP"])
         assertEquals(dirs.prootTmpDir.absolutePath, cmd.environment["PROOT_TMP_DIR"])
 
         // Guest environment arguments should include tuning & sandbox variables

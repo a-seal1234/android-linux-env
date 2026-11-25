@@ -120,9 +120,15 @@ class PtySessionLauncher(
                 }
             }
             try {
-                pfd?.close()
+                readerThread.join(1500)
             } catch (_: Throwable) {}
-            PtyBridge.closeFd(result.masterFd)
+            if (pfd != null) {
+                try {
+                    pfd.close()
+                } catch (_: Throwable) {}
+            } else {
+                PtyBridge.closeFd(result.masterFd)
+            }
         }
 
         Log.i(TAG, "Session compositor pid=${result.pid} completed with exitCode=$exitCode")

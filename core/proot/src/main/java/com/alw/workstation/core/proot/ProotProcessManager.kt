@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
  * Manages the lifecycle of spawned PRoot processes, IO stream pumps,
  * signal termination, and asynchronous execution with coroutines.
  */
-class ProotProcessManager(
+open class ProotProcessManager(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
     companion object {
@@ -131,7 +131,7 @@ class ProotProcessManager(
     /**
      * Starts a PRoot process asynchronously and pumps stdout/stderr to listeners and flows.
      */
-    fun startProcess(
+    open fun startProcess(
         command: ProotRunner.LaunchCommand,
         listener: ProcessListener? = null
     ): ManagedProcess {

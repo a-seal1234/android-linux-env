@@ -22,10 +22,14 @@
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include "cli/note.h"
@@ -243,10 +247,81 @@ typedef struct {
 	word_t arg;
 	word_t scratch;
 	uint32_t handle;
+	int super_fd;
 	bool active;
 } ChainPending;
 
 static ChainPending s_chainPending[MAX_PRIME_PENDING];
+
+typedef struct {
+	uint32_t width;
+	uint32_t height;
+	uint32_t bpp;
+	uint32_t flags;
+} AhbAllocReq;
+
+typedef struct {
+	int32_t status;
+	uint32_t strideBytes;
+	uint64_t sizeBytes;
+	uint32_t slotId;
+} AhbAllocResp;
+
+static int request_ahb_from_bridge(uint32_t width, uint32_t height, uint32_t bpp,
+				   uint32_t *out_pitch, uint64_t *out_size)
+{
+	const char *sockPath = getenv("ALW_AHB_SOCKET");
+	if (sockPath == NULL || sockPath[0] == '\0')
+		return -1;
+
+	int sfd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if (sfd < 0)
+		return -1;
+
+	struct sockaddr_un addr;
+	memset(&addr, 0, sizeof(addr));
+	addr.sun_family = AF_UNIX;
+	strncpy(addr.sun_path, sockPath, sizeof(addr.sun_path) - 1);
+	if (connect(sfd, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
+		close(sfd);
+		return -1;
+	}
+
+	AhbAllocReq req = { width, height, bpp, 0 };
+	if (send(sfd, &req, sizeof(req), MSG_NOSIGNAL) != (ssize_t) sizeof(req)) {
+		close(sfd);
+		return -1;
+	}
+
+	AhbAllocResp resp;
+	memset(&resp, 0, sizeof(resp));
+	struct iovec iov = { &resp, sizeof(resp) };
+	char cmsgBuf[CMSG_SPACE(sizeof(int))];
+	memset(cmsgBuf, 0, sizeof(cmsgBuf));
+	struct msghdr msg;
+	memset(&msg, 0, sizeof(msg));
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+	msg.msg_control = cmsgBuf;
+	msg.msg_controllen = sizeof(cmsgBuf);
+
+	ssize_t n = recvmsg(sfd, &msg, 0);
+	close(sfd);
+	if (n != (ssize_t) sizeof(resp) || resp.status != 0)
+		return -1;
+
+	int recvFd = -1;
+	struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+	if (cmsg != NULL && cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS) {
+		memcpy(&recvFd, CMSG_DATA(cmsg), sizeof(int));
+	}
+	if (recvFd < 0)
+		return -1;
+
+	if (out_pitch) *out_pitch = resp.strideBytes;
+	if (out_size) *out_size = resp.sizeBytes;
+	return recvFd;
+}
 
 static ChainPending *chain_state_for(pid_t pid, bool create)
 {
@@ -482,17 +557,35 @@ static void emulate_ioctl(Tracee *tracee, int fd, unsigned long request, word_t 
 			word_t sp, scratch;
 			struct dma_heap_allocation_data alloc;
 
+			if (dumb.flags == 0x41484246u && (int32_t) dumb.handle > 0) {
+				int traceeAhbFd = (int) dumb.handle;
+				dumb.flags = 0;
+				dumb.handle = s_nextHandle++;
+				if (dumb.pitch == 0) dumb.pitch = dumb.width * bpp / 8;
+				if (dumb.size == 0) dumb.size = (uint64_t) dumb.pitch * dumb.height;
+				DriBoEntry *bo = add_bo(tracee->pid, fd, dumb.handle, dumb.width, dumb.height, bpp, dumb.size);
+				if (bo != NULL) {
+					bo->bo_fd = traceeAhbFd;
+					bo->owns_fd = true;
+				}
+				write_data(tracee, arg, &dumb, sizeof(*&dumb));
+				VERBOSE(tracee, 2, "android_dri: create_dumb %ux%u pitch=%u handle=%u (guest AHB fd=%d)",
+					dumb.width, dumb.height, dumb.pitch, dumb.handle, traceeAhbFd);
+				result = 0;
+				poke_reg(tracee, SYSARG_RESULT, (word_t) result);
+				return;
+			}
+
 			dumb.pitch = dumb.width * bpp / 8;
 			dumb.size = (uint64_t) dumb.pitch * dumb.height;
 			dumb.handle = s_nextHandle++;
 			add_bo(tracee->pid, fd, dumb.handle, dumb.width, dumb.height, bpp, dumb.size);
 			write_data(tracee, arg, &dumb, sizeof(*&dumb));
 
-			/* The dumb buffer must own a real dma_heap buffer up-front so the
-			 * subsequent mmap() (kms_swrast's render target) and any PRIME export
-			 * share the same memory. */
 			sp = peek_reg(tracee, ORIGINAL, STACK_POINTER);
 			scratch = (sp - PRIME_SCRATCH_BACKOFF) & ~(word_t) 15;
+
+			/* Allocate a raw dma_heap buffer in the tracee (fallback when AHB shim is absent). */
 			memset(&alloc, 0, sizeof(alloc));
 			alloc.len = dumb.size;
 			alloc.fd_flags = O_RDWR | O_CLOEXEC;
@@ -855,6 +948,23 @@ int android_dri_callback(Extension *extension, ExtensionEvent event,
 					bo->owns_fd = true;
 					VERBOSE(tracee, 2, "android_dri: dumb handle %u backed by heap fd %d",
 						pending->handle, bo->bo_fd);
+				}
+			} else if (pending->kind == 5) {
+				/* Inverted AHB create_dumb: tracee opened /proc/<proot>/fd/<super_fd>. */
+				int32_t traceeFd = (int32_t) peek_reg(tracee, CURRENT, SYSARG_RESULT);
+				DriBoEntry *bo = find_bo(tracee->pid, -1, pending->handle);
+				if (pending->super_fd >= 0) {
+					close(pending->super_fd);
+					pending->super_fd = -1;
+				}
+				if (traceeFd > 0 && bo != NULL) {
+					bo->bo_fd = traceeFd;
+					bo->owns_fd = true;
+					VERBOSE(tracee, 2, "android_dri: dumb handle %u backed by AHB fd %d",
+						pending->handle, bo->bo_fd);
+				} else {
+					VERBOSE(tracee, 2, "android_dri: AHB fd import failed (%d) for handle %u",
+						traceeFd, pending->handle);
 				}
 			} else if (pending->kind == 2 || pending->kind == 3) {
 				/* PRIME export: publish the exported fd into the ioctl argument. */

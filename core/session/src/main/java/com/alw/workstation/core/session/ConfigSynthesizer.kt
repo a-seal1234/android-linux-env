@@ -72,6 +72,7 @@ object ConfigSynthesizer {
             appendLine("    },")
             appendLine("    input = {")
             appendLine("        kb_layout = \"us\",")
+            appendLine("        kb_options = \"caps:super\",")
             appendLine("        follow_mouse = 1,")
             appendLine("        touchpad = { natural_scroll = ${profile.input.touchpadNaturalScroll} },")
             appendLine("    },")
