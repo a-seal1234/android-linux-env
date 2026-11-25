@@ -3862,6 +3862,19 @@ private:
         if (tx == nullptr) return false;
         ASurfaceTransaction_setVisibility(tx, m_surfaceControl, ASURFACE_TRANSACTION_VISIBILITY_SHOW);
         ASurfaceTransaction_setBufferTransparency(tx, m_surfaceControl, ASURFACE_TRANSACTION_TRANSPARENCY_OPAQUE);
+        ASurfaceTransaction_setGeometry(tx, m_surfaceControl,
+                                      ARect{ 0, 0, width, height },
+                                      ARect{ 0, 0, width, height }, 0);
+        using SetFrameRateFn = void (*)(ASurfaceTransaction*, ASurfaceControl*, float, int8_t, int8_t);
+        static SetFrameRateFn s_setFrameRate = []() -> SetFrameRateFn {
+            void* lib = dlopen("libandroid.so", RTLD_NOW | RTLD_LOCAL);
+            if (lib == nullptr) return nullptr;
+            return reinterpret_cast<SetFrameRateFn>(dlsym(lib, "ASurfaceTransaction_setFrameRateWithChangeStrategy"));
+        }();
+        const float targetHz = m_refreshRateHz.load(std::memory_order_relaxed);
+        if (s_setFrameRate != nullptr && targetHz > 0.0f) {
+            s_setFrameRate(tx, m_surfaceControl, targetHz, 1 /* FIXED_SOURCE */, 0 /* ONLY_IF_SEAMLESS */);
+        }
         ASurfaceTransaction_setBuffer(tx, m_surfaceControl, ahb, acquireFenceFd);
         ASurfaceTransaction_apply(tx);
         ASurfaceTransaction_delete(tx);
@@ -3944,23 +3957,32 @@ private:
 
             AhbAllocReq req{};
             ssize_t n = recv(client, &req, sizeof(req), MSG_WAITALL);
-            if (n == sizeof(req) && req.width > 0 && req.height > 0) {
+            if (n == sizeof(req) &&
+                ((req.flags == 1u && (req.width > 0 || req.height > 0)) ||
+                 (req.width > 0 && req.height > 0))) {
                 AhbAllocResp resp{};
                 resp.status = -1;
                 int sendFd = -1;
 
+                uint32_t allocW = req.width;
+                uint32_t allocH = req.height;
+                if (req.flags == 1u) {
+                    const uint64_t reqBytes = (static_cast<uint64_t>(req.height) << 32) | req.width;
+                    allocW = (m_width > 0) ? static_cast<uint32_t>(m_width) : 3200u;
+                    const uint64_t rowBytes = static_cast<uint64_t>(allocW) * 4u;
+                    allocH = static_cast<uint32_t>((reqBytes + rowBytes - 1u) / rowBytes);
+                }
+
                 AHardwareBuffer_Desc desc{};
-                desc.width = req.width;
-                desc.height = req.height;
+                desc.width = allocW;
+                desc.height = allocH;
                 desc.layers = 1;
                 // Prefer BGRA_8888 (HAL format 5) to match DRM_FORMAT_XRGB8888 / ARGB8888
                 // byte order; fall back to RGBA_8888 if Gralloc rejects BGRA.
                 desc.format = 5;
                 desc.usage = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
                              AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER |
-                             AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY |
-                             AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN |
-                             AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN;
+                             AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY;
 
                 AHardwareBuffer* ahb = nullptr;
                 if (AHardwareBuffer_allocate(&desc, &ahb) != 0 || ahb == nullptr) {
